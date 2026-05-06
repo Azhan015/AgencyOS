@@ -1025,16 +1025,16 @@ mongosh
 use agency-os
 
 # Find your user (replace with your email)
-db.users.findOne({ email: "mohammedsharifazhan974@gmail.com" })
+db.users.findOne({ email: "yourname@example.com" })
 
 # Update your role to SUPERADMIN
 db.users.updateOne(
-  { email: "mohammedsharifazhan974@gmail.com" },
+  { email: "yourname@example.com" },
   { $set: { role: "SUPERADMIN" } }
 )
 
 # Verify the change
-db.users.findOne({ email: "mohammedsharifazhan974@gmail.com" }, { role: 1, name: 1 })
+db.users.findOne({ email: "yourname@example.com" }, { role: 1, name: 1 })
 
 # Exit
 exit

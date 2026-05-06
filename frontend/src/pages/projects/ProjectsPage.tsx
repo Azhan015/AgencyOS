@@ -83,13 +83,13 @@ export function ProjectsPage() {
   return (
     <div className="space-y-6 animate-fade-in">
       {/* Header */}
-      <div className="flex items-center justify-between">
+      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
         <div>
-          <h1 className="text-2xl font-bold">Projects</h1>
-          <p className="text-muted-foreground mt-1">{data?.total || 0} total projects</p>
+          <h1 className="text-xl sm:text-2xl font-bold">Projects</h1>
+          <p className="text-muted-foreground mt-1 text-sm">{data?.total || 0} total projects</p>
         </div>
         {canCreate && (
-          <Button onClick={() => setCreateOpen(true)}>
+          <Button onClick={() => setCreateOpen(true)} className="self-start sm:self-auto">
             <Plus className="mr-2 h-4 w-4" />
             New Project
           </Button>

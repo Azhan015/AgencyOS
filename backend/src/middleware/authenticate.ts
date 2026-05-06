@@ -4,23 +4,7 @@ import { AuthenticationError } from '../lib/errors';
 import { User } from '../models/User';
 import { cacheGet, cacheSet } from '../config/redis';
 
-// Augment Express Request globally so all route handlers can use req.user
-declare global {
-  namespace Express {
-    interface Request {
-      user?: {
-        id: string;
-        email: string;
-        role: string;
-        clientId?: string;
-        sessionId: string;
-        name: string;
-      };
-    }
-  }
-}
-
-// AuthRequest is just an alias for Request (user is now on the global type)
+// AuthRequest is just an alias for Request (user is on the global Express.User type)
 export type AuthRequest = Request;
 
 export async function authenticate(req: AuthRequest, _res: Response, next: NextFunction): Promise<void> {

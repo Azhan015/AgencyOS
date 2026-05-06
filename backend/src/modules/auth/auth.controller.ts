@@ -3,6 +3,7 @@ import { v4 as uuidv4 } from 'uuid';
 import * as authService from './auth.service';
 import { AuthRequest } from '../../middleware/authenticate';
 import { env } from '../../config/env';
+import { getFrontendUrl } from '../../lib/frontendUrl';
 
 const COOKIE_OPTIONS = {
   httpOnly: true,
@@ -79,6 +80,10 @@ export async function refresh(req: Request, res: Response, next: NextFunction): 
       data: { accessToken: tokens.accessToken },
     });
   } catch (error) {
+    // Clear the stale/invalid refresh token cookie so the browser stops
+    // sending it on every request — this prevents an infinite 401 loop
+    // when the user's session no longer exists (e.g. after switching DBs).
+    res.clearCookie('refreshToken', { ...COOKIE_OPTIONS, maxAge: 0 });
     next(error);
   }
 }
@@ -87,7 +92,7 @@ export async function logout(req: AuthRequest, res: Response, next: NextFunction
   try {
     const refreshToken = req.cookies?.refreshToken;
     if (req.user) {
-      await authService.logout(req.user.sessionId, refreshToken);
+      await authService.logout(req.user.sessionId ?? '', refreshToken);
     }
     res.clearCookie('refreshToken', { ...COOKIE_OPTIONS, maxAge: 0 });
     res.json({ success: true, message: 'Logged out successfully' });
@@ -99,7 +104,7 @@ export async function logout(req: AuthRequest, res: Response, next: NextFunction
 export async function sendMagicLink(req: Request, res: Response, next: NextFunction): Promise<void> {
   try {
     const { email } = req.body;
-    await authService.sendMagicLink(email);
+    await authService.sendMagicLink(email, getFrontendUrl(req));
     res.json({ success: true, message: 'If that email exists, a magic link has been sent' });
   } catch (error) {
     next(error);
@@ -131,7 +136,7 @@ export async function verifyMagicLink(req: Request, res: Response, next: NextFun
 export async function forgotPassword(req: Request, res: Response, next: NextFunction): Promise<void> {
   try {
     const { email } = req.body;
-    await authService.sendPasswordReset(email);
+    await authService.sendPasswordReset(email, getFrontendUrl(req));
     res.json({ success: true, message: 'If that email exists, a reset link has been sent' });
   } catch (error) {
     next(error);

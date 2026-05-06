@@ -41,12 +41,27 @@ export async function register(data: {
     parallelism: 4,
   });
 
+  // Check if there's a Client record with this email — if so, link the user to it
+  // This handles the case where an admin created a client record before the client registered
+  const { Client } = await import('../../models/Client');
+  const matchingClient = await Client.findOne({ email: data.email.toLowerCase().trim() });
+
   const user = await User.create({
     email: data.email,
     passwordHash,
     name: data.name,
-    role: (['SUPERADMIN', 'ADMIN', 'PROJECT_MANAGER', 'CONTRIBUTOR', 'CLIENT'].includes(data.role || '') ? data.role : 'CLIENT') as string,
+    // If linked to a client record, force CLIENT role regardless of what was passed
+    role: matchingClient
+      ? 'CLIENT'
+      : (['SUPERADMIN', 'ADMIN', 'PROJECT_MANAGER', 'CONTRIBUTOR', 'CLIENT'].includes(data.role || '') ? data.role : 'CLIENT') as string,
+    clientId: matchingClient ? matchingClient._id : undefined,
   });
+
+  // If linked to a client, update the client status to ONBOARDING
+  if (matchingClient) {
+    await Client.findByIdAndUpdate(matchingClient._id, { status: 'ONBOARDING' });
+    logger.info({ email: data.email, clientId: matchingClient._id }, 'Registered user linked to existing client record');
+  }
 
   if (data.deviceInfo) {
     await updateDeviceList(user, data.deviceInfo);
@@ -127,7 +142,7 @@ export async function logout(sessionId: string, refreshToken?: string): Promise<
   await cacheSet(`revoked:session:${sessionId}`, '1', 15 * 60); // 15 min (access token lifetime)
 }
 
-export async function sendMagicLink(email: string): Promise<void> {
+export async function sendMagicLink(email: string, frontendUrl?: string): Promise<void> {
   const user = await User.findByEmail(email);
   if (!user) {
     // Don't reveal if email exists
@@ -135,13 +150,36 @@ export async function sendMagicLink(email: string): Promise<void> {
     return;
   }
 
-  const token = generateSecureToken(32);
-  const hash = hashSHA256(token);
-  const key = `${MAGIC_LINK_PREFIX}${hash}`;
+  // Strategy: try Redis first. If Redis is unavailable, sign a short-lived JWT
+  // as the token so magic links work even without a cache layer.
+  let token: string;
+  const redisOk = (await import('../../config/redis')).isRedisAvailable();
 
-  await cacheSet(key, user._id.toString(), 72 * 60 * 60); // 72 hours
+  if (redisOk) {
+    // Redis path — store a random token hash
+    token = generateSecureToken(32);
+    const hash = hashSHA256(token);
+    const key = `${MAGIC_LINK_PREFIX}${hash}`;
+    await cacheSet(key, user._id.toString(), 72 * 60 * 60);
+  } else {
+    // No-Redis path — embed userId in a signed JWT (72h expiry)
+    // verifyMagicLink detects this format and verifies the JWT directly
+    const { signAccessToken } = await import('../../lib/jwt');
+    token = signAccessToken({
+      sub: user._id.toString(),
+      role: user.role,
+      clientId: user.clientId?.toString(),
+      sessionId: 'magic',
+    });
+    logger.info({ email }, 'Redis unavailable — using JWT-based magic link');
+  }
 
-  const link = `${env.MAGIC_LINK_BASE_URL}?token=${token}`;
+  // Use the request-derived frontend URL if available, otherwise fall back to env
+  const baseUrl = frontendUrl || env.MAGIC_LINK_BASE_URL;
+  const link = baseUrl.includes('/auth/magic')
+    ? `${baseUrl}?token=${token}`
+    : `${baseUrl}/auth/magic?token=${token}`;
+
   await sendEmail({
     to: email,
     subject: `Sign in to ${env.AGENCY_NAME}`,
@@ -153,14 +191,31 @@ export async function verifyMagicLink(
   token: string,
   deviceInfo: { deviceId: string; userAgent: string; ip: string }
 ): Promise<LoginResult> {
+  let userId: string | null = null;
+
+  // Try Redis path first
   const hash = hashSHA256(token);
   const key = `${MAGIC_LINK_PREFIX}${hash}`;
+  const cached = await cacheGet<string>(key);
 
-  const userId = await cacheGet<string>(key);
+  if (cached) {
+    // Redis hit — single-use token
+    await cacheDel(key);
+    userId = cached;
+  } else {
+    // Redis miss — try JWT path (used when Redis was unavailable at send time)
+    try {
+      const { verifyAccessToken } = await import('../../lib/jwt');
+      const payload = verifyAccessToken(token);
+      if (payload.sessionId === 'magic') {
+        userId = payload.sub;
+      }
+    } catch {
+      // Not a valid JWT either
+    }
+  }
+
   if (!userId) throw new AuthenticationError('Magic link is invalid or has expired');
-
-  // Single-use: delete immediately
-  await cacheDel(key);
 
   const user = await User.findById(userId);
   if (!user || !user.isActive) throw new AuthenticationError('User not found');
@@ -175,7 +230,7 @@ export async function verifyMagicLink(
   return { ...tokens, user: user.toSafeObject() };
 }
 
-export async function sendPasswordReset(email: string): Promise<void> {
+export async function sendPasswordReset(email: string, frontendUrl?: string): Promise<void> {
   const user = await User.findByEmail(email);
   if (!user) return; // Silent fail
 
@@ -185,7 +240,8 @@ export async function sendPasswordReset(email: string): Promise<void> {
 
   await cacheSet(key, user._id.toString(), 60 * 60); // 1 hour
 
-  const link = `${env.FRONTEND_URL}/auth/reset-password?token=${token}`;
+  const base = frontendUrl || env.FRONTEND_URL;
+  const link = `${base}/auth/reset-password?token=${token}`;
   await sendEmail({
     to: email,
     subject: 'Reset your password',

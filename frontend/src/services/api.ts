@@ -1,11 +1,13 @@
 import axios, { AxiosError, InternalAxiosRequestConfig } from 'axios';
 import { useAuthStore } from '../stores/authStore';
 
-// In development, use relative URL so Vite proxy handles CORS.
-// In production, use the env var (must be set to the full API URL).
-const API_BASE = import.meta.env.PROD
-  ? (import.meta.env.VITE_API_URL || '/api/v1')
-  : '/api/v1';
+// Always use relative /api/v1 so requests go through the same origin.
+// - In dev: Vite proxy forwards /api → http://localhost:5000
+// - In Docker: nginx proxy forwards /api → http://backend:5000
+// Using a relative URL means cookies are always same-origin (no CORS issues).
+// VITE_API_URL is only used by GoogleCallbackPage which needs the absolute URL
+// for a direct fetch() call — it reads the env var itself.
+const API_BASE = '/api/v1';
 
 export const api = axios.create({
   baseURL: API_BASE,

@@ -58,9 +58,17 @@ export function TeamPage() {
       queryClient.invalidateQueries({ queryKey: ['admin', 'team'] });
       setInviteOpen(false);
       reset();
-      toast.success('Invitation sent');
+      toast.success('Invitation sent — they will receive an email with login credentials');
     },
-    onError: () => toast.error('Failed to send invitation'),
+    onError: (error: unknown) => {
+      const status = (error as { response?: { status?: number } })?.response?.status;
+      const msg = (error as { response?: { data?: { error?: { message?: string } } } })?.response?.data?.error?.message;
+      if (status === 409) {
+        toast.error(msg || 'A user with this email already exists in the system.');
+      } else {
+        toast.error(msg || 'Failed to send invitation. Check your email configuration.');
+      }
+    },
   });
 
   const updateRoleMutation = useMutation({
@@ -96,12 +104,12 @@ export function TeamPage() {
 
   return (
     <div className="space-y-6 animate-fade-in">
-      <div className="flex items-center justify-between">
+      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
         <div>
-          <h1 className="text-2xl font-bold">Team</h1>
-          <p className="text-muted-foreground mt-1">{members.length} team members</p>
+          <h1 className="text-xl sm:text-2xl font-bold">Team</h1>
+          <p className="text-muted-foreground mt-1 text-sm">{members.length} team members</p>
         </div>
-        <Button onClick={() => setInviteOpen(true)}>
+        <Button onClick={() => setInviteOpen(true)} className="self-start sm:self-auto">
           <Plus className="mr-2 h-4 w-4" />
           Invite Member
         </Button>
@@ -141,34 +149,65 @@ export function TeamPage() {
       ) : (
         <div className="border rounded-xl divide-y">
           {members.map((member) => (
-            <div key={member._id} className="flex items-center gap-4 px-5 py-4">
-              <UserAvatar name={member.name} size="sm" />
+            <div key={member._id} className="flex items-start sm:items-center gap-3 sm:gap-4 px-4 sm:px-5 py-4">
+              <UserAvatar name={member.name} size="sm" className="flex-shrink-0 mt-0.5 sm:mt-0" />
               <div className="flex-1 min-w-0">
-                <div className="flex items-center gap-2">
+                <div className="flex items-center gap-2 flex-wrap">
                   <p className="font-medium text-sm">{member.name}</p>
                   {!member.isActive && (
                     <span className="text-xs bg-red-100 text-red-600 px-1.5 py-0.5 rounded-full">Inactive</span>
                   )}
                 </div>
-                <div className="flex items-center gap-3 mt-0.5">
-                  <span className="flex items-center gap-1 text-xs text-muted-foreground">
-                    <Mail className="h-3 w-3" />
+                <div className="flex flex-col sm:flex-row sm:items-center gap-1 sm:gap-3 mt-0.5">
+                  <span className="flex items-center gap-1 text-xs text-muted-foreground truncate">
+                    <Mail className="h-3 w-3 flex-shrink-0" />
                     {member.email}
                   </span>
                   {member.lastLoginAt && (
-                    <span className="text-xs text-muted-foreground">
+                    <span className="text-xs text-muted-foreground hidden sm:inline">
                       Last login {formatDate(member.lastLoginAt)}
                     </span>
                   )}
                 </div>
+                {/* Mobile: role + actions below name */}
+                <div className="flex items-center gap-2 mt-2 sm:hidden">
+                  {member.role !== 'SUPERADMIN' && (
+                    <select
+                      value={member.role}
+                      onChange={(e) => updateRoleMutation.mutate({ id: member._id, role: e.target.value })}
+                      className="text-xs border rounded-md px-2 py-1 bg-background focus:outline-none focus:ring-1 focus:ring-ring"
+                    >
+                      <option value="ADMIN">Admin</option>
+                      <option value="PROJECT_MANAGER">Project Manager</option>
+                      <option value="CONTRIBUTOR">Contributor</option>
+                    </select>
+                  )}
+                  {member.role === 'SUPERADMIN' && (
+                    <span className={`text-xs px-2 py-0.5 rounded-full font-medium ${roleColors[member.role]}`}>
+                      <Shield className="inline h-3 w-3 mr-1" />
+                      Superadmin
+                    </span>
+                  )}
+                  {member.role !== 'SUPERADMIN' && (
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      onClick={() => toggleActiveMutation.mutate({ id: member._id, isActive: member.isActive })}
+                      loading={toggleActiveMutation.isPending}
+                      className={`text-xs h-7 px-2 ${member.isActive ? 'text-red-500 hover:text-red-600' : 'text-emerald-600 hover:text-emerald-700'}`}
+                    >
+                      {member.isActive ? 'Deactivate' : 'Activate'}
+                    </Button>
+                  )}
+                </div>
               </div>
 
-              {/* Role selector */}
+              {/* Desktop: role + actions inline */}
               {member.role !== 'SUPERADMIN' && (
                 <select
                   value={member.role}
                   onChange={(e) => updateRoleMutation.mutate({ id: member._id, role: e.target.value })}
-                  className="text-xs border rounded-md px-2 py-1 bg-background focus:outline-none focus:ring-1 focus:ring-ring"
+                  className="hidden sm:block text-xs border rounded-md px-2 py-1 bg-background focus:outline-none focus:ring-1 focus:ring-ring"
                 >
                   <option value="ADMIN">Admin</option>
                   <option value="PROJECT_MANAGER">Project Manager</option>
@@ -177,7 +216,7 @@ export function TeamPage() {
               )}
 
               {member.role === 'SUPERADMIN' && (
-                <span className={`text-xs px-2 py-0.5 rounded-full font-medium ${roleColors[member.role]}`}>
+                <span className={`hidden sm:inline-flex text-xs px-2 py-0.5 rounded-full font-medium ${roleColors[member.role]}`}>
                   <Shield className="inline h-3 w-3 mr-1" />
                   Superadmin
                 </span>
@@ -189,7 +228,7 @@ export function TeamPage() {
                   size="sm"
                   onClick={() => toggleActiveMutation.mutate({ id: member._id, isActive: member.isActive })}
                   loading={toggleActiveMutation.isPending}
-                  className={member.isActive ? 'text-red-500 hover:text-red-600' : 'text-emerald-600 hover:text-emerald-700'}
+                  className={`hidden sm:flex ${member.isActive ? 'text-red-500 hover:text-red-600' : 'text-emerald-600 hover:text-emerald-700'}`}
                 >
                   {member.isActive ? 'Deactivate' : 'Activate'}
                 </Button>

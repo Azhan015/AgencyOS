@@ -12,6 +12,9 @@ import { LoginPage } from '@/pages/auth/LoginPage';
 import { RegisterPage } from '@/pages/auth/RegisterPage';
 import { ForgotPasswordPage } from '@/pages/auth/ForgotPasswordPage';
 import { ResetPasswordPage } from '@/pages/auth/ResetPasswordPage';
+import { GoogleCallbackPage } from '@/pages/auth/GoogleCallbackPage';
+import { AcceptInvitePage } from '@/pages/auth/AcceptInvitePage';
+import { MagicLinkPage } from '@/pages/auth/MagicLinkPage';
 
 // App pages
 import { DashboardPage } from '@/pages/dashboard/DashboardPage';
@@ -83,8 +86,12 @@ export default function App() {
         <Route path="/auth/register"       element={<RequireGuest><RegisterPage /></RequireGuest>} />
         <Route path="/auth/forgot-password" element={<RequireGuest><ForgotPasswordPage /></RequireGuest>} />
         <Route path="/auth/reset-password" element={<ResetPasswordPage />} />
-        <Route path="/auth/magic"          element={<LoginPage />} />
-        <Route path="/auth/accept-invite"  element={<LoginPage />} />
+        {/* Magic link — dedicated isolated page, no RequireGuest wrapper */}
+        <Route path="/auth/magic"          element={<MagicLinkPage />} />
+        {/* Accept invite — dedicated page for setting password from email link */}
+        <Route path="/auth/accept-invite"  element={<AcceptInvitePage />} />
+        {/* Google OAuth callback — reads token from URL hash, no auth guard needed */}
+        <Route path="/auth/google/callback" element={<GoogleCallbackPage />} />
 
         {/* ── Protected app (AppShell layout) ────────────────── */}
         <Route element={<RequireAuth />}>

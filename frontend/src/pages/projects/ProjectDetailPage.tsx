@@ -76,13 +76,13 @@ export function ProjectDetailPage() {
       </div>
 
       {/* Project header */}
-      <div className="flex items-start justify-between">
+      <div className="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-3">
         <div>
-          <div className="flex items-center gap-3 mb-1">
-            <h1 className="text-2xl font-bold">{project.name}</h1>
+          <div className="flex items-center gap-3 mb-1 flex-wrap">
+            <h1 className="text-xl sm:text-2xl font-bold">{project.name}</h1>
             <StatusPill status={project.status} />
           </div>
-          <p className="text-muted-foreground">{project.clientId?.companyName}</p>
+          <p className="text-muted-foreground text-sm">{project.clientId?.companyName}</p>
         </div>
         <div className="flex items-center gap-2">
           <Button variant="outline" size="sm">
@@ -148,12 +148,12 @@ export function ProjectDetailPage() {
 
       {/* Tabs */}
       <div className="border-b">
-        <div className="flex gap-1">
+        <div className="flex gap-1 overflow-x-auto scrollbar-hide">
           {tabs.map((tab) => (
             <button
               key={tab.id}
               onClick={() => setActiveTab(tab.id)}
-              className={`px-4 py-2.5 text-sm font-medium border-b-2 transition-colors ${
+              className={`px-3 sm:px-4 py-2.5 text-xs sm:text-sm font-medium border-b-2 transition-colors whitespace-nowrap flex-shrink-0 ${
                 activeTab === tab.id
                   ? 'border-primary text-primary'
                   : 'border-transparent text-muted-foreground hover:text-foreground'

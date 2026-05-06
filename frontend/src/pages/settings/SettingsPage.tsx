@@ -71,27 +71,27 @@ export function SettingsPage() {
   ];
 
   return (
-    <div className="space-y-6 animate-fade-in max-w-3xl">
+    <div className="space-y-4 sm:space-y-6 animate-fade-in max-w-3xl">
       <div>
-        <h1 className="text-2xl font-bold">Settings</h1>
-        <p className="text-muted-foreground mt-1">Manage your account preferences</p>
+        <h1 className="text-xl sm:text-2xl font-bold">Settings</h1>
+        <p className="text-muted-foreground mt-1 text-sm">Manage your account preferences</p>
       </div>
 
-      <div className="flex gap-6">
-        {/* Sidebar */}
-        <div className="w-48 flex-shrink-0">
-          <nav className="space-y-1">
+      <div className="flex flex-col sm:flex-row gap-4 sm:gap-6">
+        {/* Sidebar — horizontal scrollable tabs on mobile, vertical nav on desktop */}
+        <div className="sm:w-44 flex-shrink-0">
+          <nav className="flex sm:flex-col gap-1 overflow-x-auto pb-1 sm:pb-0 scrollbar-hide">
             {tabs.map((tab) => {
               const Icon = tab.icon;
               return (
                 <button
                   key={tab.id}
                   onClick={() => setActiveTab(tab.id)}
-                  className={`w-full flex items-center gap-3 px-3 py-2 rounded-lg text-sm transition-colors ${
+                  className={`flex items-center gap-2 sm:gap-3 px-3 py-2 rounded-lg text-sm transition-colors whitespace-nowrap flex-shrink-0 sm:w-full ${
                     activeTab === tab.id ? 'bg-primary/10 text-primary font-medium' : 'text-muted-foreground hover:bg-accent'
                   }`}
                 >
-                  <Icon className="h-4 w-4" />
+                  <Icon className="h-4 w-4 flex-shrink-0" />
                   {tab.label}
                 </button>
               );

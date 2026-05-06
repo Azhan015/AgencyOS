@@ -74,7 +74,8 @@ router.patch('/:id', authorize('contracts:write'), async (req: AuthRequest, res,
 
 router.post('/:id/send', authorize('contracts:write'), async (req: AuthRequest, res, next) => {
   try {
-    const contract = await service.sendContract(req.params.id);
+    const { getFrontendUrl } = await import('../../lib/frontendUrl');
+    const contract = await service.sendContract(req.params.id, getFrontendUrl(req));
     res.json({ success: true, data: contract });
   } catch (e) { next(e); }
 });

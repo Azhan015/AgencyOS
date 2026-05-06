@@ -72,10 +72,10 @@ export function ApprovalsPage() {
 
   return (
     <div className="space-y-6 animate-fade-in">
-      <div className="flex items-center justify-between">
+      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
         <div>
-          <h1 className="text-2xl font-bold">Approvals</h1>
-          <p className="text-muted-foreground mt-1">{data?.total || 0} total approvals</p>
+          <h1 className="text-xl sm:text-2xl font-bold">Approvals</h1>
+          <p className="text-muted-foreground mt-1 text-sm">{data?.total || 0} total approvals</p>
         </div>
       </div>
 

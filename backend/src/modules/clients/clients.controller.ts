@@ -46,7 +46,8 @@ export async function remove(req: AuthRequest, res: Response, next: NextFunction
 
 export async function invite(req: AuthRequest, res: Response, next: NextFunction): Promise<void> {
   try {
-    await service.inviteClient(req.params.id, req.body.resend);
+    const { getFrontendUrl } = await import('../../lib/frontendUrl');
+    await service.inviteClient(req.params.id, req.body.resend, getFrontendUrl(req));
     res.json({ success: true, message: 'Invitation sent' });
   } catch (error) { next(error); }
 }

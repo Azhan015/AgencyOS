@@ -12,7 +12,8 @@ const createClientSchema = z.object({
   contactName: z.string().min(1).max(100),
   email: z.string().email(),
   phone: z.string().optional(),
-  website: z.string().url().optional().or(z.literal('')),
+  // Accept a valid URL, an empty string, or omit entirely — never reject a blank website field
+  website: z.string().url().optional().or(z.literal('')).or(z.undefined()),
   tier: z.enum(['STARTER', 'GROWTH', 'ENTERPRISE']).optional(),
   assignedPM: z.string().optional(),
   metadata: z.record(z.unknown()).optional(),

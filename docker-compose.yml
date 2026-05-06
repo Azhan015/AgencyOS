@@ -36,14 +36,18 @@ services:
       - "5000:5000"
     env_file:
       - ./backend/.env
+    # NOTE: The environment block below overrides .env values.
+    # We intentionally do NOT override MONGODB_URI here so the value
+    # from backend/.env is used (your local MongoDB via host.docker.internal).
+    # Only REDIS_URL is overridden to use the containerised Redis service.
     environment:
-      MONGODB_URI: mongodb://mongodb:27017/agency-os
       REDIS_URL: redis://redis:6379
+    # host.docker.internal works natively on Mac/Windows Docker Desktop.
+    # On Linux this extra_hosts entry maps it to the host gateway IP.
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     depends_on:
-      - mongodb
       - redis
-    volumes:
-      - ./backend/src:/app/src
     networks:
       - agency-os-network
 

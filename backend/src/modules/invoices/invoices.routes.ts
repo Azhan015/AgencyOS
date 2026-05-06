@@ -75,7 +75,8 @@ router.patch('/:id', authorize('invoices:write'), async (req: AuthRequest, res, 
 
 router.post('/:id/send', authorize('invoices:write'), async (req: AuthRequest, res, next) => {
   try {
-    const invoice = await service.sendInvoice(req.params.id);
+    const { getFrontendUrl } = await import('../../lib/frontendUrl');
+    const invoice = await service.sendInvoice(req.params.id, getFrontendUrl(req));
     res.json({ success: true, data: invoice });
   } catch (e) { next(e); }
 });
@@ -89,7 +90,8 @@ router.post('/:id/void', authorize('invoices:write'), async (req: AuthRequest, r
 
 router.post('/:id/payment-link', authorize('invoices:read'), async (req: AuthRequest, res, next) => {
   try {
-    const url = await service.createPaymentLink(req.params.id);
+    const { getFrontendUrl } = await import('../../lib/frontendUrl');
+    const url = await service.createPaymentLink(req.params.id, getFrontendUrl(req));
     res.json({ success: true, data: { url } });
   } catch (e) { next(e); }
 });

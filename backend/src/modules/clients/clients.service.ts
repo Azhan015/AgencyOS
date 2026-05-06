@@ -102,7 +102,7 @@ export async function deleteClient(id: string): Promise<void> {
   await cacheDel(`client:${id}`);
 }
 
-export async function inviteClient(clientId: string, resend = false): Promise<void> {
+export async function inviteClient(clientId: string, resend = false, frontendUrl?: string): Promise<void> {
   const client = await Client.findById(clientId);
   if (!client) throw new NotFoundError('Client');
 
@@ -125,12 +125,13 @@ export async function inviteClient(clientId: string, resend = false): Promise<vo
 
   await cacheSet(key, JSON.stringify({ clientId: client._id.toString(), userId: user._id.toString() }), 72 * 60 * 60);
 
-  const inviteLink = `${env.FRONTEND_URL}/auth/accept-invite?token=${token}`;
+  const base = frontendUrl || env.FRONTEND_URL;
+  const inviteLink = `${base}/auth/accept-invite?token=${token}`;
 
   await sendEmail({
     to: client.email,
     subject: `You're invited to ${env.AGENCY_NAME}'s client portal`,
-    html: getInvitationEmail(client.contactName, env.AGENCY_NAME, inviteLink),
+    html: getInvitationEmail(client.contactName, env.AGENCY_NAME, inviteLink, env.AGENCY_EMAIL),
   });
 
   if (!resend) {

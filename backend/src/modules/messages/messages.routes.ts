@@ -51,6 +51,36 @@ router.get('/channels', authorize('messages:read'), async (req: AuthRequest, res
   } catch (e) { next(e); }
 });
 
+// Create a new channel for a project (ADMIN / SUPERADMIN / PROJECT_MANAGER)
+router.post('/channels', authorize('messages:write'), validateBody(z.object({
+  projectId: z.string().min(1),
+  name: z.string().min(1).max(80).regex(/^[a-z0-9-]+$/, 'Channel name must be lowercase letters, numbers, and hyphens only'),
+  type: z.enum(['PROJECT', 'ANNOUNCEMENT']).optional(),
+})), async (req: AuthRequest, res, next) => {
+  try {
+    const { Channel } = await import('../../models/Channel');
+    const { projectId, name, type } = req.body;
+
+    // Check for duplicate channel name in this project
+    const existing = await Channel.findOne({ projectId, name });
+    if (existing) {
+      res.status(409).json({ success: false, error: { message: `A channel named #${name} already exists in this project` } });
+      return;
+    }
+
+    const channel = await Channel.create({
+      projectId,
+      name,
+      type: type || 'PROJECT',
+      members: [req.user!.id],
+      createdBy: req.user!.id,
+    });
+
+    const populated = await channel.populate('projectId', 'name');
+    res.status(201).json({ success: true, data: populated });
+  } catch (e) { next(e); }
+});
+
 router.get('/channels/:channelId/messages', authorize('messages:read'), async (req: AuthRequest, res, next) => {
   try {
     const { before, limit } = req.query as Record<string, string>;

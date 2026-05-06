@@ -1,11 +1,12 @@
 import { Router } from 'express';
 import { z } from 'zod';
+import mongoose from 'mongoose';
 import { authenticate, AuthRequest } from '../../middleware/authenticate';
 import { authorizeRoles } from '../../middleware/authorize';
 import { validateBody } from '../../middleware/validate';
 import { User } from '../../models/User';
 import { AuditLog } from '../../models/AuditLog';
-import { NotFoundError } from '../../lib/errors';
+import { NotFoundError, AuthorizationError } from '../../lib/errors';
 import argon2 from 'argon2';
 
 const router = Router();
@@ -40,21 +41,15 @@ router.post('/team/invite', validateBody(z.object({
 
     const user = await User.create({ email, name, role, passwordHash });
 
-    // Send invite email
-    const { sendEmail } = await import('../../lib/email');
+    // Send invite email using proper template
+    const { sendEmail, getTeamInviteEmail } = await import('../../lib/email');
     const { env } = await import('../../config/env');
+    const { getFrontendUrl } = await import('../../lib/frontendUrl');
+    const frontendUrl = getFrontendUrl(req);
     await sendEmail({
       to: email,
       subject: `You've been invited to ${env.AGENCY_NAME}`,
-      html: `
-        <div style="font-family: sans-serif; max-width: 480px; margin: 0 auto; padding: 40px 20px;">
-          <h2>Welcome to ${env.AGENCY_NAME}</h2>
-          <p>Hi ${name}, you've been invited as a ${role}.</p>
-          <p>Your temporary password: <strong>${tempPassword}</strong></p>
-          <p>Please log in and change your password immediately.</p>
-          <a href="${env.FRONTEND_URL}/auth/login" style="display: inline-block; background: #2563eb; color: white; padding: 12px 24px; border-radius: 8px; text-decoration: none;">Login</a>
-        </div>
-      `,
+      html: getTeamInviteEmail(name, email, role, env.AGENCY_NAME, `${frontendUrl}/auth/login`, tempPassword),
     });
 
     res.status(201).json({ success: true, data: user.toSafeObject() });
@@ -106,6 +101,49 @@ router.get('/audit-logs', async (req: AuthRequest, res, next) => {
     ]);
 
     res.json({ success: true, data: { logs, total, page: Number(page), limit: Number(limit) } });
+  } catch (e) { next(e); }
+});
+
+// ── Promote user to SUPERADMIN (SUPERADMIN only) ──────────────────────────────
+// Use this endpoint to promote your own account or any account to SUPERADMIN.
+// Only existing SUPERADMINs can call this. On a fresh install, use the
+// /admin/bootstrap-superadmin endpoint (no auth required, only works when
+// there are zero SUPERADMINs in the database).
+router.patch('/team/:id/promote-superadmin', async (req: AuthRequest, res, next) => {
+  try {
+    // Only SUPERADMIN can promote to SUPERADMIN
+    if (req.user?.role !== 'SUPERADMIN') {
+      throw new AuthorizationError('Only a SUPERADMIN can promote another user to SUPERADMIN');
+    }
+    const user = await User.findByIdAndUpdate(
+      req.params.id,
+      { role: 'SUPERADMIN' },
+      { new: true }
+    ).select('-passwordHash');
+    if (!user) throw new NotFoundError('User');
+    res.json({ success: true, data: user, message: `${user.name} has been promoted to SUPERADMIN` });
+  } catch (e) { next(e); }
+});
+
+// ── MongoDB health check ──────────────────────────────────────────────────────
+// Returns connection state, database name, and registered users count.
+router.get('/db-health', async (_req, res, next) => {
+  try {
+    const state = mongoose.connection.readyState;
+    const stateMap: Record<number, string> = { 0: 'disconnected', 1: 'connected', 2: 'connecting', 3: 'disconnecting' };
+    const dbName = mongoose.connection.db?.databaseName ?? 'unknown';
+    const userCount = await User.countDocuments();
+    const users = await User.find().select('name email role isActive createdAt').sort({ createdAt: -1 }).limit(20).lean();
+    res.json({
+      success: true,
+      data: {
+        status: stateMap[state] ?? 'unknown',
+        readyState: state,
+        database: dbName,
+        totalUsers: userCount,
+        recentUsers: users,
+      },
+    });
   } catch (e) { next(e); }
 });
 

@@ -28,6 +28,7 @@ interface Message {
 export function MessagesPage() {
   const [selectedChannel, setSelectedChannel] = useState<Channel | null>(null);
   const [messageText, setMessageText] = useState('');
+  const [showChannelList, setShowChannelList] = useState(true);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const queryClient = useQueryClient();
   const { user } = useAuthStore();
@@ -101,10 +102,19 @@ export function MessagesPage() {
     }
   };
 
+  // On mobile, selecting a channel hides the channel list
+  const handleSelectChannel = (ch: Channel) => {
+    setSelectedChannel(ch);
+    setShowChannelList(false);
+  };
+
   return (
     <div className="flex h-[calc(100vh-8rem)] border rounded-xl overflow-hidden animate-fade-in">
       {/* Channel sidebar */}
-      <div className="w-64 border-r flex flex-col bg-muted/30">
+      <div className={`
+        ${showChannelList ? 'flex' : 'hidden'} sm:flex
+        w-full sm:w-64 border-r flex-col bg-muted/30 flex-shrink-0
+      `}>
         <div className="p-4 border-b">
           <h2 className="font-semibold text-sm">Channels</h2>
         </div>
@@ -121,7 +131,7 @@ export function MessagesPage() {
             channels.map((ch) => (
               <button
                 key={ch._id}
-                onClick={() => setSelectedChannel(ch)}
+                onClick={() => handleSelectChannel(ch)}
                 className={`w-full flex items-center gap-2 px-3 py-2 rounded-lg text-sm transition-colors text-left ${
                   selectedChannel?._id === ch._id
                     ? 'bg-primary/10 text-primary font-medium'
@@ -142,7 +152,10 @@ export function MessagesPage() {
       </div>
 
       {/* Messages area */}
-      <div className="flex-1 flex flex-col">
+      <div className={`
+        ${!showChannelList ? 'flex' : 'hidden'} sm:flex
+        flex-1 flex-col min-w-0
+      `}>
         {!selectedChannel ? (
           <div className="flex-1 flex items-center justify-center">
             <div className="text-center">
@@ -153,10 +166,20 @@ export function MessagesPage() {
         ) : (
           <>
             {/* Channel header */}
-            <div className="px-5 py-3.5 border-b flex items-center gap-2">
-              <Hash className="h-4 w-4 text-muted-foreground" />
-              <span className="font-semibold">{selectedChannel.name}</span>
-              <span className="text-xs text-muted-foreground">· {selectedChannel.projectId?.name}</span>
+            <div className="px-4 sm:px-5 py-3.5 border-b flex items-center gap-2">
+              {/* Back button — mobile only */}
+              <button
+                onClick={() => setShowChannelList(true)}
+                className="sm:hidden p-1 -ml-1 rounded-md hover:bg-accent text-muted-foreground mr-1"
+                aria-label="Back to channels"
+              >
+                <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 19l-7-7 7-7" />
+                </svg>
+              </button>
+              <Hash className="h-4 w-4 text-muted-foreground flex-shrink-0" />
+              <span className="font-semibold truncate">{selectedChannel.name}</span>
+              <span className="text-xs text-muted-foreground hidden sm:inline truncate">· {selectedChannel.projectId?.name}</span>
             </div>
 
             {/* Messages */}

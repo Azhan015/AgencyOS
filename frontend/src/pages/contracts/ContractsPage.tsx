@@ -42,13 +42,13 @@ export function ContractsPage() {
 
   return (
     <div className="space-y-6 animate-fade-in">
-      <div className="flex items-center justify-between">
+      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
         <div>
-          <h1 className="text-2xl font-bold">Contracts</h1>
-          <p className="text-muted-foreground mt-1">{data?.total || 0} total contracts</p>
+          <h1 className="text-xl sm:text-2xl font-bold">Contracts</h1>
+          <p className="text-muted-foreground mt-1 text-sm">{data?.total || 0} total contracts</p>
         </div>
         {canCreate && (
-          <Button onClick={() => toast('Contract creation coming soon — use the project contracts tab', { icon: '📄' })}>
+          <Button onClick={() => toast('Contract creation coming soon — use the project contracts tab', { icon: '📄' })} className="self-start sm:self-auto">
             <Plus className="mr-2 h-4 w-4" />
             New Contract
           </Button>

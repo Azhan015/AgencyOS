@@ -89,7 +89,7 @@ export async function updateContract(id: string, data: Partial<IContract>): Prom
   return updated!;
 }
 
-export async function sendContract(id: string): Promise<IContract> {
+export async function sendContract(id: string, frontendUrl?: string): Promise<IContract> {
   const contract = await Contract.findById(id).populate('clientId');
   if (!contract) throw new NotFoundError('Contract');
 
@@ -108,18 +108,12 @@ export async function sendContract(id: string): Promise<IContract> {
   // Send email to client
   try {
     const client = updated.clientId as unknown as { email: string; contactName: string };
-    const link = `${env.FRONTEND_URL}/contracts/${id}`;
+    const link = `${frontendUrl || env.FRONTEND_URL}/contracts/${id}`;
+    const { getContractEmail } = await import('../../lib/email');
     await sendEmail({
       to: client.email,
       subject: `Contract ready for review: ${updated.title}`,
-      html: `
-        <div style="font-family: sans-serif; max-width: 480px; margin: 0 auto; padding: 40px 20px;">
-          <h2>Contract Ready for Review</h2>
-          <p>Hi ${client.contactName},</p>
-          <p>A contract is ready for your review and signature: <strong>${updated.title}</strong></p>
-          <a href="${link}" style="display: inline-block; background: #2563eb; color: white; padding: 12px 24px; border-radius: 8px; text-decoration: none; margin-top: 16px;">Review & Sign</a>
-        </div>
-      `,
+      html: getContractEmail(client.contactName, updated.title, env.AGENCY_NAME, link),
     });
   } catch (err) {
     logger.warn({ err }, 'Contract email failed');

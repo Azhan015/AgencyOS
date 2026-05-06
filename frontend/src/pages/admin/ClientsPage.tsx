@@ -56,24 +56,48 @@ export function ClientsPage() {
 
   const createMutation = useMutation({
     mutationFn: async (data: CreateClientForm) => {
-      const res = await api.post('/clients', data);
+      // Strip empty strings so the backend URL validator never sees ""
+      const payload = {
+        ...data,
+        website: data.website?.trim() || undefined,
+        phone: data.phone?.trim() || undefined,
+      };
+      const res = await api.post('/clients', payload);
       return res.data.data;
     },
-    onSuccess: () => {
+    onSuccess: async (client) => {
       queryClient.invalidateQueries({ queryKey: ['clients'] });
       setCreateOpen(false);
       reset();
       toast.success('Client created');
+      // Auto-send invitation email after creating
+      try {
+        await api.post(`/clients/${client._id}/invite`);
+        toast.success(`Invitation sent to ${client.email}`);
+      } catch {
+        toast('Client created. Send invitation from the client card.', { icon: '📧' });
+      }
     },
-    onError: () => toast.error('Failed to create client'),
+    onError: (error: unknown) => {
+      const status = (error as { response?: { status?: number } })?.response?.status;
+      const msg = (error as { response?: { data?: { error?: { message?: string } } } })?.response?.data?.error?.message;
+      if (status === 409) {
+        toast.error(msg || 'A client with this email already exists.');
+      } else {
+        toast.error(msg || 'Failed to create client. Please try again.');
+      }
+    },
   });
 
   const inviteMutation = useMutation({
     mutationFn: async (clientId: string) => {
       await api.post(`/clients/${clientId}/invite`);
     },
-    onSuccess: () => toast.success('Invitation sent'),
-    onError: () => toast.error('Failed to send invitation'),
+    onSuccess: () => toast.success('Invitation email sent'),
+    onError: (error: unknown) => {
+      const msg = (error as { response?: { data?: { error?: { message?: string } } } })?.response?.data?.error?.message;
+      toast.error(msg || 'Failed to send invitation. Check your email configuration.');
+    },
   });
 
   const clients = data?.clients || [];
@@ -157,12 +181,12 @@ export function ClientsPage() {
                     {client.tier}
                   </span>
                   <div className="flex gap-1">
-                    {canWrite && (client.status === 'INVITED' || client.status === 'ACTIVE') && (
+                    {canWrite && (
                       <Button
                         variant="ghost"
                         size="icon-sm"
                         onClick={() => inviteMutation.mutate(client._id)}
-                        title="Resend invitation"
+                        title={client.status === 'INVITED' ? 'Resend invitation' : 'Send invitation'}
                       >
                         <Send className="h-3.5 w-3.5" />
                       </Button>

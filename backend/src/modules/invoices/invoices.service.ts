@@ -129,7 +129,7 @@ export async function updateInvoice(id: string, data: Partial<IInvoice>): Promis
   return updated;
 }
 
-export async function sendInvoice(id: string): Promise<IInvoice> {
+export async function sendInvoice(id: string, frontendUrl?: string): Promise<IInvoice> {
   const invoice = await Invoice.findById(id).populate('clientId');
   if (!invoice) throw new NotFoundError('Invoice');
 
@@ -178,7 +178,7 @@ export async function sendInvoice(id: string): Promise<IInvoice> {
   // Send email
   try {
     const client = updated.clientId as unknown as { email: string; contactName: string };
-    const payLink = `${env.FRONTEND_URL}/invoices/${id}/pay`;
+    const payLink = `${frontendUrl || env.FRONTEND_URL}/invoices/${id}/pay`;
     await sendEmail({
       to: client.email,
       subject: `Invoice ${updated.invoiceNumber} from ${env.AGENCY_NAME}`,
@@ -224,7 +224,7 @@ export async function voidInvoice(id: string): Promise<IInvoice> {
   return updated!;
 }
 
-export async function createPaymentLink(id: string): Promise<string> {
+export async function createPaymentLink(id: string, frontendUrl?: string): Promise<string> {
   const invoice = await Invoice.findById(id).populate('clientId');
   if (!invoice) throw new NotFoundError('Invoice');
 
@@ -251,8 +251,8 @@ export async function createPaymentLink(id: string): Promise<string> {
         currency: invoice.currency,
         quantity: 1,
       })),
-      `${env.FRONTEND_URL}/invoices/${id}?payment=success`,
-      `${env.FRONTEND_URL}/invoices/${id}?payment=cancelled`,
+      `${frontendUrl || env.FRONTEND_URL}/invoices/${id}?payment=success`,
+      `${frontendUrl || env.FRONTEND_URL}/invoices/${id}?payment=cancelled`,
       { invoiceId: id, invoiceNumber: invoice.invoiceNumber }
     );
 

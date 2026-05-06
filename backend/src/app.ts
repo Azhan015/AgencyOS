@@ -5,11 +5,13 @@ import helmet from 'helmet';
 import compression from 'compression';
 import cookieParser from 'cookie-parser';
 import mongoSanitize from 'express-mongo-sanitize';
+import passport from 'passport';
 import { env } from './config/env';
 import { requestId } from './middleware/requestId';
 import { errorHandler, notFoundHandler } from './middleware/errorHandler';
 import { generalLimiter } from './middleware/rateLimiter';
 import { logger } from './lib/logger';
+import { initPassport } from './lib/passport';
 
 // Route imports
 import authRoutes from './modules/auth/auth.routes';
@@ -72,6 +74,10 @@ app.use(compression());
 // Security
 app.use(mongoSanitize());
 
+// Initialize Passport (Google OAuth)
+initPassport();
+app.use(passport.initialize());
+
 // Request ID
 app.use(requestId);
 
@@ -89,6 +95,76 @@ app.get('/health', (_req, res) => {
     env: env.NODE_ENV,
     timestamp: new Date().toISOString(),
   });
+});
+
+// Bootstrap superadmin — only works when NO superadmin exists in the DB.
+// Call: POST /api/v1/auth/bootstrap-superadmin  { email: "you@example.com" }
+// This promotes the user with that email to SUPERADMIN.
+// Once a SUPERADMIN exists this endpoint returns 403.
+app.post(`/api/${env.API_VERSION}/auth/bootstrap-superadmin`, async (req, res, next) => {
+  try {
+    const { User } = await import('./models/User');
+    const superadminCount = await User.countDocuments({ role: 'SUPERADMIN' });
+    if (superadminCount > 0) {
+      res.status(403).json({ success: false, error: { message: 'A SUPERADMIN already exists. Use the admin panel to promote users.' } });
+      return;
+    }
+    const { email } = req.body;
+    if (!email) {
+      res.status(400).json({ success: false, error: { message: 'email is required' } });
+      return;
+    }
+    const user = await User.findOneAndUpdate(
+      { email: email.toLowerCase().trim() },
+      { role: 'SUPERADMIN' },
+      { new: true }
+    ).select('-passwordHash');
+    if (!user) {
+      res.status(404).json({ success: false, error: { message: 'No user found with that email. Register first.' } });
+      return;
+    }
+    res.json({ success: true, data: user, message: `${user.name} (${user.email}) has been promoted to SUPERADMIN` });
+  } catch (e) { next(e); }
+});
+
+// ── Dev-only: set password directly without email/Redis ──────────────────────
+// Use this when you're locked out and can't receive reset emails.
+// Only works in NODE_ENV=development. Disabled in production automatically.
+// Call: POST /api/v1/auth/dev-set-password  { email: "you@example.com", password: "newpassword" }
+app.post(`/api/${env.API_VERSION}/auth/dev-set-password`, async (req, res, next) => {
+  try {
+    if (env.NODE_ENV !== 'development') {
+      res.status(403).json({ success: false, error: { message: 'Only available in development mode' } });
+      return;
+    }
+    const { email, password } = req.body;
+    if (!email || !password) {
+      res.status(400).json({ success: false, error: { message: 'email and password are required' } });
+      return;
+    }
+    if (password.length < 8) {
+      res.status(400).json({ success: false, error: { message: 'password must be at least 8 characters' } });
+      return;
+    }
+    const { User } = await import('./models/User');
+    const argon2 = await import('argon2');
+    const passwordHash = await argon2.hash(password, {
+      type: argon2.argon2id,
+      memoryCost: 65536,
+      timeCost: 3,
+      parallelism: 4,
+    });
+    const user = await User.findOneAndUpdate(
+      { email: email.toLowerCase().trim() },
+      { passwordHash },
+      { new: true }
+    ).select('-passwordHash');
+    if (!user) {
+      res.status(404).json({ success: false, error: { message: 'No user found with that email' } });
+      return;
+    }
+    res.json({ success: true, message: `Password set for ${user.email}. You can now sign in with email + password.` });
+  } catch (e) { next(e); }
 });
 
 // API Routes
