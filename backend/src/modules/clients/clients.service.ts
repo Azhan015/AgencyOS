@@ -6,7 +6,9 @@ import { cacheGet, cacheSet, cacheDel } from '../../config/redis';
 import { NotFoundError, ConflictError, ValidationError } from '../../lib/errors';
 import { env } from '../../config/env';
 import { generateSecureToken, hashSHA256 } from '../../lib/crypto';
+import { signAccessToken, signRefreshToken } from '../../lib/jwt';
 import { logger } from '../../lib/logger';
+import { v4 as uuidv4 } from 'uuid';
 import mongoose from 'mongoose';
 
 const INVITE_TOKEN_PREFIX = 'invite:';
@@ -123,7 +125,7 @@ export async function inviteClient(clientId: string, resend = false, frontendUrl
   const hash = hashSHA256(token);
   const key = `${INVITE_TOKEN_PREFIX}${hash}`;
 
-  await cacheSet(key, JSON.stringify({ clientId: client._id.toString(), userId: user._id.toString() }), 72 * 60 * 60);
+  await cacheSet(key, { clientId: client._id.toString(), userId: user._id.toString() }, 72 * 60 * 60);
 
   const base = frontendUrl || env.FRONTEND_URL;
   const inviteLink = `${base}/auth/accept-invite?token=${token}`;
@@ -141,14 +143,29 @@ export async function inviteClient(clientId: string, resend = false, frontendUrl
   logger.info({ clientId, email: client.email }, 'Client invitation sent');
 }
 
-export async function acceptInvite(token: string, password?: string): Promise<{ userId: string; clientId: string }> {
+export async function acceptInvite(token: string, password?: string): Promise<{ userId: string; clientId: string; accessToken: string; refreshToken: string; user: Partial<import('../../models/User').IUser> }> {
   const hash = hashSHA256(token);
   const key = `${INVITE_TOKEN_PREFIX}${hash}`;
 
-  const data = await cacheGet<string>(key);
-  if (!data) throw new ValidationError('Invitation token is invalid or expired');
+  const raw = await cacheGet<unknown>(key);
+  if (!raw) throw new ValidationError('Invitation token is invalid or expired');
 
-  const { clientId, userId } = JSON.parse(data);
+  // cacheGet already JSON.parses the stored value, so raw is either:
+  //   - an object  { clientId, userId }  (Redis returned parsed JSON)
+  //   - a string   '{"clientId":...}'    (Redis returned raw string, shouldn't happen but guard anyway)
+  let clientId: string;
+  let userId: string;
+
+  if (typeof raw === 'string') {
+    const parsed = JSON.parse(raw) as { clientId: string; userId: string };
+    clientId = parsed.clientId;
+    userId   = parsed.userId;
+  } else {
+    const parsed = raw as { clientId: string; userId: string };
+    clientId = parsed.clientId;
+    userId   = parsed.userId;
+  }
+
   await cacheDel(key);
 
   if (password) {
@@ -164,7 +181,34 @@ export async function acceptInvite(token: string, password?: string): Promise<{ 
 
   await Client.findByIdAndUpdate(clientId, { status: 'ONBOARDING' });
 
-  return { userId, clientId };
+  // Auto-login: generate tokens so the frontend can log the user in immediately
+  const user = await User.findById(userId);
+  if (!user) throw new ValidationError('User not found after accepting invite');
+
+  const sessionId = uuidv4();
+  const tokenFamily = uuidv4();
+
+  const accessToken = signAccessToken({
+    sub: user._id.toString(),
+    role: user.role,
+    clientId: user.clientId?.toString(),
+    sessionId,
+  });
+
+  const refreshToken = signRefreshToken({
+    sub: user._id.toString(),
+    sessionId,
+    family: tokenFamily,
+  });
+
+  // Store refresh token hash in Redis
+  const refreshHash = hashSHA256(refreshToken);
+  await cacheSet(`refresh:${sessionId}`, refreshHash, 7 * 24 * 60 * 60);
+
+  user.lastLoginAt = new Date();
+  await user.save();
+
+  return { userId, clientId, accessToken, refreshToken, user: user.toSafeObject() };
 }
 
 export async function getClientAnalytics(clientId: string) {

@@ -35,15 +35,7 @@ export function useRegister() {
       toast.success('Account created! Welcome to Agency OS.');
       navigate('/dashboard');
     },
-    onError: (error: unknown) => {
-      const status = (error as { response?: { status?: number } })?.response?.status;
-      const msg = (error as { response?: { data?: { error?: { message?: string } } } })?.response?.data?.error?.message;
-      if (status === 409) {
-        toast.error(msg || 'An account with this email already exists. Please sign in instead.');
-      } else {
-        toast.error(msg || 'Registration failed. Please try again.');
-      }
-    },
+    // No onError here — RegisterPage handles errors inline with its own banner
   });
 }
 
@@ -57,14 +49,14 @@ export function useLogin() {
       return response.data.data;
     },
     onSuccess: (data) => {
-      login(normalizeAuthUser(data.user), data.accessToken);
+      const user = normalizeAuthUser(data.user);
+      login(user, data.accessToken);
       toast.success('Welcome back!');
+      // Navigate to the correct dashboard based on role
       navigate('/dashboard');
     },
-    onError: (error: unknown) => {
-      const msg = (error as { response?: { data?: { error?: { message?: string } } } })?.response?.data?.error?.message || 'Login failed';
-      toast.error(msg);
-    },
+    // No onError here — let the caller handle it so the LoginPage can show
+    // an inline error banner instead of just a toast
   });
 }
 

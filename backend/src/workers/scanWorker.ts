@@ -2,6 +2,7 @@ import { File } from '../models/File';
 import { env } from '../config/env';
 import { logger } from '../lib/logger';
 import { isRedisAvailable } from '../config/redis';
+import { getBullRedisOptions } from '../config/bullRedis';
 
 // Lazy-initialized Bull queue — only created when Redis is available
 let scanQueue: import('bull').Queue | null = null;
@@ -11,7 +12,7 @@ function getScanQueue(): import('bull').Queue | null {
   if (!scanQueue) {
     const Bull = require('bull');
     scanQueue = new Bull('file-scan', {
-      redis: env.REDIS_URL,
+      redis: getBullRedisOptions(),
       defaultJobOptions: {
         attempts: 3,
         backoff: { type: 'exponential', delay: 5000 },

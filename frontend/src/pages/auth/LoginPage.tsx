@@ -3,10 +3,10 @@ import { Link, useSearchParams } from 'react-router-dom';
 import { useForm } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import { z } from 'zod';
-import { Eye, EyeOff, Mail, Lock } from 'lucide-react';
+import { Eye, EyeOff, Mail, Lock, AlertCircle } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
-import { useLogin, useMagicLink, useVerifyMagicLink } from '@/hooks/useAuth';
+import { useLogin, useMagicLink } from '@/hooks/useAuth';
 import { Logo } from '@/components/ui/logo';
 
 const loginSchema = z.object({
@@ -44,51 +44,67 @@ export function LoginPage() {
   const [showPassword, setShowPassword] = useState(false);
   const [magicMode, setMagicMode] = useState(false);
   const [magicEmail, setMagicEmail] = useState('');
+  const [magicSent, setMagicSent] = useState(false);
+  const [loginError, setLoginError] = useState<string | null>(null);
   const [searchParams] = useSearchParams();
-  const magicToken = searchParams.get('token');
 
   const login = useLogin();
   const sendMagicLink = useMagicLink();
-  const verifyMagicLink = useVerifyMagicLink();
 
   const { register, handleSubmit, formState: { errors } } = useForm<LoginForm>({
     resolver: zodResolver(loginSchema),
   });
 
-  // Auto-verify magic link token from URL
+  // Show error from Google OAuth failure redirect (?error=google_failed)
+  // or from a Google-only account trying to use password (?error=google_no_password)
   useEffect(() => {
-    if (magicToken) {
-      verifyMagicLink.mutate(magicToken);
+    const error = searchParams.get('error');
+    if (error === 'google_failed') {
+      setLoginError('Google sign-in failed. Please try again or use email/password.');
+    } else if (error === 'google_no_password') {
+      setLoginError(
+        'This email is registered with Google. Please use "Sign in with Google" instead of a password.'
+      );
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [magicToken]);
+  }, [searchParams]);
 
   const onSubmit = (data: LoginForm) => {
-    login.mutate(data);
+    setLoginError(null);
+    login.mutate(data, {
+      onError: (error: unknown) => {
+        const msg =
+          (error as { response?: { data?: { error?: { message?: string } } } })?.response?.data
+            ?.error?.message || 'Login failed';
+        // Detect the "use Google / magic link" error and show a specific on-screen warning
+        if (
+          msg.toLowerCase().includes('google') ||
+          msg.toLowerCase().includes('magic link') ||
+          msg.toLowerCase().includes('no password')
+        ) {
+          setLoginError(
+            'This account was created with Google. Please use "Sign in with Google" or request a magic link to sign in.'
+          );
+        } else {
+          setLoginError(msg);
+        }
+      },
+    });
   };
 
   const handleMagicLink = () => {
-    if (magicEmail) {
-      sendMagicLink.mutate(magicEmail);
-    }
+    if (!magicEmail) return;
+    sendMagicLink.mutate(magicEmail, {
+      onSuccess: () => setMagicSent(true),
+    });
   };
 
   // Google OAuth URL — must always be the absolute backend URL (not a relative path)
   // because this is a full browser redirect, not an API call through the Vite proxy.
-  // VITE_BACKEND_URL is the backend origin without /api/v1 (e.g. http://localhost:5000)
+  // We pass the current frontend origin as a query param so the backend can redirect
+  // back to the correct port after OAuth (5173 for local dev, 3000 for Docker, etc.)
   const backendUrl = import.meta.env.VITE_BACKEND_URL || 'http://localhost:5000';
-  const googleAuthUrl = `${backendUrl}/api/v1/auth/google`;
-
-  if (magicToken) {
-    return (
-      <div className="min-h-screen flex items-center justify-center bg-background">
-        <div className="text-center">
-          <div className="h-8 w-8 border-2 border-primary border-t-transparent rounded-full animate-spin mx-auto mb-4" />
-          <p className="text-muted-foreground">Signing you in...</p>
-        </div>
-      </div>
-    );
-  }
+  const currentOrigin = window.location.origin;
+  const googleAuthUrl = `${backendUrl}/api/v1/auth/google?origin=${encodeURIComponent(currentOrigin)}`;
 
   return (
     <div className="min-h-screen flex">
@@ -101,6 +117,14 @@ export function LoginPage() {
             <h1 className="text-2xl font-bold">Welcome back</h1>
             <p className="text-muted-foreground mt-1">Sign in to your Agency OS portal</p>
           </div>
+
+          {/* On-screen error banner (Google mismatch, OAuth failure, etc.) */}
+          {loginError && (
+            <div className="mb-4 flex items-start gap-3 rounded-lg border border-destructive/40 bg-destructive/10 px-4 py-3 text-sm text-destructive">
+              <AlertCircle className="h-4 w-4 mt-0.5 shrink-0" />
+              <span>{loginError}</span>
+            </div>
+          )}
 
           {!magicMode ? (
             <form onSubmit={handleSubmit(onSubmit)} className="space-y-4">
@@ -159,7 +183,7 @@ export function LoginPage() {
                 type="button"
                 variant="outline"
                 className="w-full"
-                onClick={() => window.location.href = googleAuthUrl}
+                onClick={() => { window.location.href = googleAuthUrl; }}
               >
                 <GoogleIcon />
                 Sign in with Google
@@ -174,30 +198,66 @@ export function LoginPage() {
             </form>
           ) : (
             <div className="space-y-4">
-              <div>
-                <p className="text-sm text-muted-foreground mb-4">
-                  Enter your email and we'll send you a magic link to sign in instantly.
-                </p>
-                <Input
-                  label="Email"
-                  type="email"
-                  placeholder="you@company.com"
-                  leftIcon={<Mail className="h-4 w-4" />}
-                  value={magicEmail}
-                  onChange={(e) => setMagicEmail(e.target.value)}
-                />
-              </div>
-              <Button
-                className="w-full"
-                onClick={handleMagicLink}
-                loading={sendMagicLink.isPending}
-                disabled={!magicEmail}
-              >
-                Send magic link
-              </Button>
-              <Button variant="ghost" className="w-full" onClick={() => setMagicMode(false)}>
-                Back to password login
-              </Button>
+              {magicSent ? (
+                /* ── Sent confirmation ── */
+                <div className="text-center py-4">
+                  <div className="h-14 w-14 rounded-full bg-emerald-100 dark:bg-emerald-900/30 flex items-center justify-center mx-auto mb-4">
+                    <Mail className="h-7 w-7 text-emerald-600 dark:text-emerald-400" />
+                  </div>
+                  <h2 className="text-lg font-semibold mb-1">Check your inbox</h2>
+                  <p className="text-sm text-muted-foreground mb-1">
+                    We sent a sign-in link to
+                  </p>
+                  <p className="text-sm font-medium mb-4">{magicEmail}</p>
+                  <p className="text-xs text-muted-foreground mb-6">
+                    The link expires in 72 hours and can only be used once.
+                    Check your spam folder if you don't see it.
+                  </p>
+                  <Button
+                    variant="outline"
+                    className="w-full"
+                    onClick={() => { setMagicSent(false); setMagicEmail(''); }}
+                  >
+                    Send to a different email
+                  </Button>
+                  <Button
+                    variant="ghost"
+                    className="w-full mt-2"
+                    onClick={() => { setMagicMode(false); setMagicSent(false); }}
+                  >
+                    Back to password login
+                  </Button>
+                </div>
+              ) : (
+                /* ── Email input ── */
+                <>
+                  <div>
+                    <p className="text-sm text-muted-foreground mb-4">
+                      Enter your email and we'll send you a magic link to sign in instantly.
+                    </p>
+                    <Input
+                      label="Email"
+                      type="email"
+                      placeholder="you@company.com"
+                      leftIcon={<Mail className="h-4 w-4" />}
+                      value={magicEmail}
+                      onChange={(e) => setMagicEmail(e.target.value)}
+                      onKeyDown={(e) => e.key === 'Enter' && handleMagicLink()}
+                    />
+                  </div>
+                  <Button
+                    className="w-full"
+                    onClick={handleMagicLink}
+                    loading={sendMagicLink.isPending}
+                    disabled={!magicEmail}
+                  >
+                    Send magic link
+                  </Button>
+                  <Button variant="ghost" className="w-full" onClick={() => setMagicMode(false)}>
+                    Back to password login
+                  </Button>
+                </>
+              )}
             </div>
           )}
         </div>

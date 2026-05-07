@@ -43,7 +43,6 @@ export async function register(data: {
 
   // Check if there's a Client record with this email — if so, link the user to it
   // This handles the case where an admin created a client record before the client registered
-  const { Client } = await import('../../models/Client');
   const matchingClient = await Client.findOne({ email: data.email.toLowerCase().trim() });
 
   const user = await User.create({
@@ -82,7 +81,10 @@ export async function login(
   const user = await User.findOne({ email: email.toLowerCase().trim() }).select('+passwordHash') as IUser | null;
   if (!user || !user.isActive) throw new AuthenticationError('Invalid credentials');
 
-  if (!user.passwordHash) throw new AuthenticationError('Please use magic link or Google to sign in');
+  if (!user.passwordHash) {
+    // User signed up via Google OAuth — they have no password set
+    throw new AuthenticationError('This account uses Google sign-in. Please use "Sign in with Google" or request a magic link.');
+  }
 
   const valid = await argon2.verify(user.passwordHash, password);
   if (!valid) throw new AuthenticationError('Invalid credentials');
@@ -142,12 +144,19 @@ export async function logout(sessionId: string, refreshToken?: string): Promise<
   await cacheSet(`revoked:session:${sessionId}`, '1', 15 * 60); // 15 min (access token lifetime)
 }
 
-export async function sendMagicLink(email: string, frontendUrl?: string): Promise<void> {
+export async function sendMagicLink(email: string, frontendUrl?: string): Promise<{ sent: boolean }> {
   const user = await User.findByEmail(email);
   if (!user) {
-    // Don't reveal if email exists
+    // Return sent: false so the controller can respond appropriately.
+    // We do NOT throw — the frontend shows a generic "if registered, check email" message
+    // to avoid leaking whether an email is registered.
     logger.info({ email }, 'Magic link requested for non-existent email');
-    return;
+    return { sent: false };
+  }
+
+  if (!user.isActive) {
+    logger.info({ email }, 'Magic link requested for inactive user');
+    return { sent: false };
   }
 
   // Strategy: try Redis first. If Redis is unavailable, sign a short-lived JWT
@@ -176,6 +185,7 @@ export async function sendMagicLink(email: string, frontendUrl?: string): Promis
 
   // Use the request-derived frontend URL if available, otherwise fall back to env
   const baseUrl = frontendUrl || env.MAGIC_LINK_BASE_URL;
+  // Ensure the link always points to /auth/magic?token=...
   const link = baseUrl.includes('/auth/magic')
     ? `${baseUrl}?token=${token}`
     : `${baseUrl}/auth/magic?token=${token}`;
@@ -185,6 +195,8 @@ export async function sendMagicLink(email: string, frontendUrl?: string): Promis
     subject: `Sign in to ${env.AGENCY_NAME}`,
     html: getMagicLinkEmail(user.name, link),
   });
+
+  return { sent: true };
 }
 
 export async function verifyMagicLink(

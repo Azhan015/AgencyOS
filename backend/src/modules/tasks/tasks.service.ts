@@ -19,7 +19,8 @@ export async function listTasks(query: {
 
   return Task.find(filter)
     .populate('assignees', 'name email avatar')
-    .populate('createdBy', 'name email')
+    .populate('createdBy', 'name email avatar')
+    .populate('completedBy', 'name email avatar')
     .sort({ order: 1, createdAt: -1 })
     .lean();
 }
@@ -27,7 +28,8 @@ export async function listTasks(query: {
 export async function getTask(id: string): Promise<ITask> {
   const task = await Task.findById(id)
     .populate('assignees', 'name email avatar')
-    .populate('createdBy', 'name email');
+    .populate('createdBy', 'name email avatar')
+    .populate('completedBy', 'name email avatar');
   if (!task) throw new NotFoundError('Task');
   return task;
 }
@@ -73,12 +75,30 @@ export async function createTask(data: {
   return task;
 }
 
-export async function updateTask(id: string, data: Partial<ITask>): Promise<ITask> {
+export async function updateTask(id: string, data: Partial<ITask>, actingUserId?: string): Promise<ITask> {
+  const isDone = data.status === 'DONE';
+  const wasNotDone = (await Task.findById(id).select('status').lean())?.status !== 'DONE';
+
   const task = await Task.findByIdAndUpdate(
     id,
-    { $set: { ...data, ...(data.status === 'DONE' ? { completedAt: new Date() } : {}) } },
+    {
+      $set: {
+        ...data,
+        // Record completion timestamp and who completed it
+        ...(isDone && wasNotDone
+          ? { completedAt: new Date(), completedBy: actingUserId ?? null }
+          : {}),
+        // Clear completion info if moved back out of DONE
+        ...(!isDone && data.status
+          ? { completedAt: null, completedBy: null }
+          : {}),
+      },
+    },
     { new: true, runValidators: true }
-  ).populate('assignees', 'name email avatar');
+  )
+    .populate('assignees', 'name email avatar')
+    .populate('createdBy', 'name email avatar')
+    .populate('completedBy', 'name email avatar');
 
   if (!task) throw new NotFoundError('Task');
   return task;

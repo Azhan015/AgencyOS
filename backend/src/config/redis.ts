@@ -7,32 +7,71 @@ let redisSubscriber: RedisClientType | null = null;
 let redisPublisher: RedisClientType | null = null;
 let redisAvailable = false;
 
+/**
+ * Build a redis client config from the URL.
+ * Upstash (and any other TLS Redis) uses rediss:// — the `redis` npm client
+ * needs socket.tls = true when the scheme is rediss://.
+ */
+function makeClientConfig(url: string) {
+  const isTls = url.startsWith('rediss://');
+  return {
+    url,
+    socket: {
+      tls: isTls,
+      // Upstash free tier closes idle connections after ~60 s.
+      // Keep-alive pings prevent the "Socket closed unexpectedly" error.
+      keepAlive: 10000,
+      // Don't retry forever — fail fast so the server can still start.
+      reconnectStrategy: (retries: number) => {
+        if (retries >= 3) return new Error('Redis: max reconnect attempts reached');
+        return Math.min(retries * 500, 2000);
+      },
+    },
+  };
+}
+
 export async function connectRedis(): Promise<void> {
   try {
-    const client = createClient({ url: env.REDIS_URL }) as RedisClientType;
-    const subscriber = createClient({ url: env.REDIS_URL }) as RedisClientType;
-    const publisher = createClient({ url: env.REDIS_URL }) as RedisClientType;
+    const cfg = makeClientConfig(env.REDIS_URL);
 
-    client.on('error', (err) => logger.error({ err }, 'Redis client error'));
-    client.on('connect', () => logger.info('✅ Redis connected'));
+    const client     = createClient(cfg) as RedisClientType;
+    const subscriber = createClient(cfg) as RedisClientType;
+    const publisher  = createClient(cfg) as RedisClientType;
+
+    // Log errors but don't crash — the server runs fine without Redis
+    client.on('error',     (err) => logger.warn({ err }, 'Redis client error'));
+    subscriber.on('error', (err) => logger.warn({ err }, 'Redis subscriber error'));
+    publisher.on('error',  (err) => logger.warn({ err }, 'Redis publisher error'));
+
+    client.on('connect',     () => logger.info('✅ Redis connected'));
     client.on('reconnecting', () => logger.warn('Redis reconnecting...'));
 
-    await Promise.all([
-      client.connect(),
-      subscriber.connect(),
-      publisher.connect(),
+    // Race the connection against a 5-second timeout so a bad URL doesn't
+    // block the server from starting.
+    const timeout = (ms: number) =>
+      new Promise<never>((_, reject) =>
+        setTimeout(() => reject(new Error(`Redis connect timeout after ${ms}ms`)), ms)
+      );
+
+    await Promise.race([
+      Promise.all([client.connect(), subscriber.connect(), publisher.connect()]),
+      timeout(5000),
     ]);
 
-    redisClient = client;
+    redisClient     = client;
     redisSubscriber = subscriber;
-    redisPublisher = publisher;
-    redisAvailable = true;
+    redisPublisher  = publisher;
+    redisAvailable  = true;
+
+    logger.info('✅ Redis ready');
   } catch (err) {
+    // Non-fatal — the app works without Redis (magic links fall back to JWT,
+    // rate limiting falls back to in-memory, real-time features are degraded).
     logger.warn(
       { err },
-      '⚠️  Redis not available — running without cache/sessions. ' +
-      'Rate limiting, token storage, and real-time features will be degraded. ' +
-      'Start Redis or set REDIS_URL to a running instance.'
+      '⚠️  Redis unavailable — running without cache/sessions. ' +
+      'Magic links, token rotation, and real-time features will be degraded. ' +
+      'Check REDIS_URL (Upstash requires rediss://, not redis://).'
     );
     redisAvailable = false;
   }
@@ -59,15 +98,20 @@ export function getRedisPublisher(): RedisClientType {
 
 export async function disconnectRedis(): Promise<void> {
   if (!redisAvailable) return;
-  await Promise.all([
-    redisClient?.quit(),
-    redisSubscriber?.quit(),
-    redisPublisher?.quit(),
-  ]);
-  logger.info('Redis disconnected');
+  try {
+    await Promise.all([
+      redisClient?.quit(),
+      redisSubscriber?.quit(),
+      redisPublisher?.quit(),
+    ]);
+    logger.info('Redis disconnected');
+  } catch {
+    // Ignore disconnect errors during shutdown
+  }
 }
 
-// Cache helpers — all gracefully no-op when Redis is unavailable
+// ── Cache helpers — all gracefully no-op when Redis is unavailable ────────────
+
 export async function cacheGet<T>(key: string): Promise<T | null> {
   if (!redisAvailable || !redisClient) return null;
   try {

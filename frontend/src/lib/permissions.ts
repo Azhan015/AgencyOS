@@ -1,8 +1,10 @@
-import { Response, NextFunction } from 'express';
-import { AuthRequest } from './authenticate';
-import { AuthorizationError } from '../lib/errors';
+/**
+ * Client-side permission helper — mirrors the backend ROLE_PERMISSIONS map.
+ * Used to conditionally show/hide UI elements based on the logged-in user's role.
+ * The backend always enforces permissions authoritatively; this is purely for UX.
+ */
 
-export type Permission =
+type Permission =
   | 'clients:read' | 'clients:write'
   | 'projects:read' | 'projects:write'
   | 'tasks:read' | 'tasks:write'
@@ -56,8 +58,6 @@ const ROLE_PERMISSIONS: Record<string, Permission[]> = {
     'analytics:read',
     'approvals:read', 'approvals:write',
   ],
-  // Contributors can create and update tasks — that is their primary function.
-  // They cannot manage projects, clients, invoices, or contracts.
   CONTRIBUTOR: [
     'projects:read',
     'tasks:read', 'tasks:write',
@@ -65,7 +65,6 @@ const ROLE_PERMISSIONS: Record<string, Permission[]> = {
     'messages:read', 'messages:write',
     'approvals:read',
   ],
-  // Clients can view tasks (read-only) but cannot create or modify them.
   CLIENT: [
     'projects:read',
     'tasks:read',
@@ -77,38 +76,10 @@ const ROLE_PERMISSIONS: Record<string, Permission[]> = {
   ],
 };
 
-export function authorize(...permissions: Permission[]) {
-  return (req: AuthRequest, _res: Response, next: NextFunction): void => {
-    if (!req.user) {
-      return next(new AuthorizationError('Authentication required'));
-    }
-
-    const userPermissions = ROLE_PERMISSIONS[req.user.role] || [];
-    const hasPermission = permissions.every(p => userPermissions.includes(p));
-
-    if (!hasPermission) {
-      return next(new AuthorizationError(`Insufficient permissions. Required: ${permissions.join(', ')}`));
-    }
-
-    next();
-  };
-}
-
-export function authorizeRoles(...roles: string[]) {
-  return (req: AuthRequest, _res: Response, next: NextFunction): void => {
-    if (!req.user) {
-      return next(new AuthorizationError('Authentication required'));
-    }
-
-    if (!roles.includes(req.user.role)) {
-      return next(new AuthorizationError(`Role ${req.user.role} is not authorized`));
-    }
-
-    next();
-  };
-}
-
 export function hasPermission(role: string, permission: Permission): boolean {
-  const perms = ROLE_PERMISSIONS[role] || [];
-  return perms.includes(permission);
+  return (ROLE_PERMISSIONS[role] ?? []).includes(permission);
+}
+
+export function hasAnyPermission(role: string, permissions: Permission[]): boolean {
+  return permissions.some(p => hasPermission(role, p));
 }

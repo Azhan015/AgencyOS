@@ -14,6 +14,7 @@ export interface ITask extends Document {
   assignees: mongoose.Types.ObjectId[];
   dueDate?: Date;
   completedAt?: Date;
+  completedBy?: mongoose.Types.ObjectId;   // who marked it DONE
   dependencies: mongoose.Types.ObjectId[];
   tags: string[];
   order: number;
@@ -40,6 +41,7 @@ const TaskSchema = new Schema<ITask>({
   assignees: [{ type: Schema.Types.ObjectId, ref: 'User' }],
   dueDate: Date,
   completedAt: Date,
+  completedBy: { type: Schema.Types.ObjectId, ref: 'User', default: null },
   dependencies: [{ type: Schema.Types.ObjectId, ref: 'Task' }],
   tags: [String],
   order: { type: Number, default: 0 },

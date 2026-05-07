@@ -96,22 +96,64 @@ router.post('/dev-set-password', async (req, res, next) => {
 });
 
 // ── Google OAuth ──────────────────────────────────────────────────────────────
-// Step 1: Redirect user to Google's consent screen
+// Step 1: Redirect user to Google's consent screen.
+// We encode the frontend origin in the OAuth `state` parameter so the callback
+// can redirect back to the correct port (5173 for local dev, 3000 for Docker,
+// or the production URL). This is far more reliable than reading the Referer
+// header, which Google does not forward.
 router.get(
   '/google',
   authLimiter,
-  passport.authenticate('google', { scope: ['profile', 'email'], session: false })
+  (req, res, next) => {
+    // Read the frontend origin from the query string (set by the frontend button)
+    // and embed it in the OAuth state so we can recover it in the callback.
+    const origin = (req.query.origin as string) || env.FRONTEND_URL;
+    // Whitelist: only allow known origins to prevent open-redirect attacks
+    const allowed = [env.FRONTEND_URL, 'http://localhost:3000', 'http://localhost:5173'];
+    const safeOrigin = allowed.includes(origin) ? origin : env.FRONTEND_URL;
+    // Base64-encode so it survives URL encoding in the state param
+    const state = Buffer.from(JSON.stringify({ origin: safeOrigin })).toString('base64url');
+    passport.authenticate('google', {
+      scope: ['profile', 'email'],
+      session: false,
+      state,
+    })(req, res, next);
+  }
 );
 
 // Step 2: Google redirects back here after user consents
 router.get(
   '/google/callback',
-  passport.authenticate('google', { session: false, failureRedirect: `${env.FRONTEND_URL}/auth/login?error=google_failed` }),
+  (req, res, next) => {
+    // Decode the frontend origin from state before Passport processes the callback
+    // so we can use it in the success handler below.
+    // We store it on res.locals (typed as Record<string,unknown>) to avoid
+    // casting req which TypeScript rejects.
+    try {
+      const stateRaw = req.query.state as string | undefined;
+      if (stateRaw) {
+        const decoded = JSON.parse(Buffer.from(stateRaw, 'base64url').toString('utf8'));
+        res.locals._frontendOrigin = decoded.origin || env.FRONTEND_URL;
+      }
+    } catch {
+      res.locals._frontendOrigin = env.FRONTEND_URL;
+    }
+    next();
+  },
+  (req, res, next) => {
+    const frontendOrigin = (res.locals._frontendOrigin as string) || env.FRONTEND_URL;
+    passport.authenticate('google', {
+      session: false,
+      failureRedirect: `${frontendOrigin}/auth/login?error=google_failed`,
+    })(req, res, next);
+  },
   async (req, res) => {
     try {
       const user = req.user as unknown as IUser;
+      const frontendOrigin = (res.locals._frontendOrigin as string) || env.FRONTEND_URL;
+
       if (!user) {
-        res.redirect(`${env.FRONTEND_URL}/auth/login?error=google_failed`);
+        res.redirect(`${frontendOrigin}/auth/login?error=google_failed`);
         return;
       }
 
@@ -147,18 +189,11 @@ router.get(
       };
       res.cookie('refreshToken', refreshToken, cookieOptions);
 
-      // Determine the correct frontend origin to redirect to.
-      // Google OAuth is a server-side redirect so we can't read the Origin header here.
-      // We support both known local ports and fall back to FRONTEND_URL for production.
-      const referer = req.headers.referer || '';
-      let frontendOrigin = env.FRONTEND_URL;
-      if (referer.includes('localhost:5173')) frontendOrigin = 'http://localhost:5173';
-      else if (referer.includes('localhost:3000')) frontendOrigin = 'http://localhost:3000';
-
       res.redirect(`${frontendOrigin}/auth/google/callback#token=${accessToken}`);
     } catch (error) {
       logger.error({ error }, 'Google OAuth callback error');
-      res.redirect(`${env.FRONTEND_URL}/auth/login?error=google_failed`);
+      const frontendOrigin = (res.locals._frontendOrigin as string) || env.FRONTEND_URL;
+      res.redirect(`${frontendOrigin}/auth/login?error=google_failed`);
     }
   }
 );

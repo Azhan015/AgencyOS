@@ -5,10 +5,15 @@
  * RequireGuest guards, form state, or other login logic.
  * Reads the token from the URL, calls the verify endpoint, stores the
  * result in the auth store, and navigates to /dashboard.
+ *
+ * Uses the relative /api/v1 path so it works through both the Vite dev
+ * proxy (localhost:5173 → localhost:5000) and the nginx Docker proxy
+ * (localhost:3000 → backend:5000) without any extra configuration.
  */
 import { useEffect, useRef, useState } from 'react';
-import { useSearchParams, useNavigate } from 'react-router-dom';
+import { useSearchParams, useNavigate, Link } from 'react-router-dom';
 import { useAuthStore } from '@/stores/authStore';
+import { Button } from '@/components/ui/button';
 import toast from 'react-hot-toast';
 
 function normalizeUser(user: Record<string, unknown>) {
@@ -26,7 +31,7 @@ export function MagicLinkPage() {
   const [searchParams] = useSearchParams();
   const navigate = useNavigate();
   const { login } = useAuthStore();
-  const [status, setStatus] = useState<'verifying' | 'error'>('verifying');
+  const [status, setStatus] = useState<'verifying' | 'success' | 'error'>('verifying');
   const [errorMsg, setErrorMsg] = useState('');
   const called = useRef(false); // prevent double-call in React StrictMode
 
@@ -38,11 +43,11 @@ export function MagicLinkPage() {
 
     if (!token) {
       setStatus('error');
-      setErrorMsg('No token in URL. Please use the link from your email.');
+      setErrorMsg('No token found in the link. Please use the link from your email.');
       return;
     }
 
-    // Call the backend directly — always use relative path so nginx/Vite proxy handles it
+    // Use relative path — works through Vite proxy (dev) and nginx proxy (Docker)
     fetch('/api/v1/auth/magic-link/verify', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -58,13 +63,15 @@ export function MagicLinkPage() {
       })
       .then((data) => {
         login(normalizeUser(data.user as Record<string, unknown>), data.accessToken as string);
+        setStatus('success');
         toast.success('Signed in successfully!');
         navigate('/dashboard', { replace: true });
       })
       .catch((err: Error) => {
         setStatus('error');
-        setErrorMsg(err.message || 'This magic link is invalid or has expired.');
-        toast.error(err.message || 'Magic link failed');
+        const msg = err.message || 'This magic link is invalid or has expired.';
+        setErrorMsg(msg);
+        toast.error(msg);
       });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
@@ -72,13 +79,22 @@ export function MagicLinkPage() {
   return (
     <div className="min-h-screen flex items-center justify-center bg-background px-4">
       <div className="text-center max-w-sm">
-        {status === 'verifying' ? (
+        {status === 'verifying' && (
           <>
             <div className="h-10 w-10 border-2 border-primary border-t-transparent rounded-full animate-spin mx-auto mb-4" />
             <p className="text-lg font-medium">Signing you in…</p>
             <p className="text-muted-foreground text-sm mt-1">Please wait a moment.</p>
           </>
-        ) : (
+        )}
+
+        {status === 'success' && (
+          <>
+            <div className="h-10 w-10 border-2 border-primary border-t-transparent rounded-full animate-spin mx-auto mb-4" />
+            <p className="text-lg font-medium">Signed in! Redirecting…</p>
+          </>
+        )}
+
+        {status === 'error' && (
           <>
             <div className="h-12 w-12 rounded-full bg-destructive/10 flex items-center justify-center mx-auto mb-4">
               <svg className="h-6 w-6 text-destructive" fill="none" viewBox="0 0 24 24" stroke="currentColor">
@@ -87,12 +103,15 @@ export function MagicLinkPage() {
             </div>
             <p className="text-lg font-medium text-destructive">Link invalid or expired</p>
             <p className="text-muted-foreground text-sm mt-1 mb-6">{errorMsg}</p>
-            <a
-              href="/auth/login"
-              className="inline-flex items-center justify-center h-10 rounded-md bg-primary px-6 text-sm font-medium text-primary-foreground hover:bg-primary/90 transition-colors"
-            >
-              Back to sign in
-            </a>
+            <div className="space-y-3">
+              <Link to="/auth/login">
+                <Button className="w-full">Back to sign in</Button>
+              </Link>
+              <p className="text-xs text-muted-foreground">
+                Magic links expire after 72 hours and can only be used once.
+                Request a new one from the sign-in page.
+              </p>
+            </div>
           </>
         )}
       </div>

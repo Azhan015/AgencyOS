@@ -6,8 +6,8 @@
  *
  * The client receives an email with this link. On this page they:
  *   1. See a welcome message
- *   2. Set their own password (or skip if they'll use Google/magic link)
- *   3. Are logged in automatically after accepting
+ *   2. Set their own password
+ *   3. Are logged in automatically after accepting (no need to sign in again)
  *
  * If the token is missing or expired, they see a clear error with a link
  * to request a new invitation from the agency.
@@ -23,6 +23,7 @@ import { Input } from '@/components/ui/input';
 import { Logo } from '@/components/ui/logo';
 import api from '@/services/api';
 import { useAuthStore } from '@/stores/authStore';
+import type { AuthUser } from '@/stores/authStore';
 import toast from 'react-hot-toast';
 
 const setPasswordSchema = z
@@ -36,6 +37,17 @@ const setPasswordSchema = z
   });
 
 type SetPasswordForm = z.infer<typeof setPasswordSchema>;
+
+function normalizeUser(user: Record<string, unknown>): AuthUser {
+  return {
+    id: String(user.id ?? user._id ?? ''),
+    email: String(user.email ?? ''),
+    name: String(user.name ?? 'User'),
+    role: String(user.role ?? 'CLIENT'),
+    clientId: user.clientId ? String(user.clientId) : undefined,
+    avatar: typeof user.avatar === 'string' ? user.avatar : undefined,
+  };
+}
 
 export function AcceptInvitePage() {
   const [searchParams] = useSearchParams();
@@ -65,20 +77,18 @@ export function AcceptInvitePage() {
     if (!token) return;
     setIsSubmitting(true);
     try {
-      // Accept the invite and set password
+      // Accept the invite, set password, and get back JWT tokens for auto-login
       const res = await api.post('/clients/accept-invite', {
         token,
         password: data.password,
       });
 
-      const { userId } = res.data.data;
+      const { accessToken, user } = res.data.data;
 
-      // Now log the user in with their new password — we need to fetch their email first
-      // The backend returns userId; we use magic-link-style auto-login via a fresh token
-      // Actually: call /auth/me after setting a session via login endpoint
-      // Simplest: redirect to login with a success message
-      toast.success('Password set! Please sign in with your email and new password.');
-      navigate('/auth/login');
+      // Auto-login — no need to redirect to the login page
+      login(normalizeUser(user as Record<string, unknown>), accessToken as string);
+      toast.success('Welcome! Your account is ready.');
+      navigate('/dashboard', { replace: true });
     } catch (err: unknown) {
       const msg =
         (err as { response?: { data?: { error?: { message?: string } } } })?.response?.data?.error
@@ -169,7 +179,7 @@ export function AcceptInvitePage() {
             />
 
             <Button type="submit" className="w-full" loading={isSubmitting}>
-              Set Password & Continue
+              Set Password & Sign In
             </Button>
           </form>
 
@@ -190,7 +200,7 @@ export function AcceptInvitePage() {
           </div>
           <h2 className="text-xl font-semibold mb-2">Your portal is ready</h2>
           <p className="text-muted-foreground text-sm">
-            Once you set your password, you'll have access to your projects, invoices, contracts, and more.
+            Once you set your password, you'll have instant access to your projects, invoices, contracts, and more.
           </p>
         </div>
       </div>

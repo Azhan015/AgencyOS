@@ -2,6 +2,7 @@ import { sendEmail } from '../lib/email';
 import { env } from '../config/env';
 import { logger } from '../lib/logger';
 import { isRedisAvailable } from '../config/redis';
+import { getBullRedisOptions } from '../config/bullRedis';
 
 // Lazy-initialized Bull queue — only created when Redis is available
 let emailQueue: import('bull').Queue | null = null;
@@ -11,7 +12,7 @@ function getEmailQueue(): import('bull').Queue | null {
   if (!emailQueue) {
     const Bull = require('bull');
     emailQueue = new Bull('email', {
-      redis: env.REDIS_URL,
+      redis: getBullRedisOptions(),
       defaultJobOptions: {
         attempts: 3,
         backoff: { type: 'exponential', delay: 2000 },

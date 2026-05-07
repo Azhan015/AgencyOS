@@ -65,16 +65,19 @@ export const useAuthStore = create<AuthState>()(
         accessToken: state.accessToken,
         isAuthenticated: state.isAuthenticated,
       }),
-      // On rehydration, clear auth if the stored access token is already expired.
-      // The refresh interceptor will handle getting a new token on the first API call,
-      // but if the refresh cookie is also gone the user should be sent to login.
+      // On rehydration, only clear auth if the stored access token is completely
+      // invalid (bad format / missing). If it's merely expired, leave isAuthenticated
+      // true so RequireAuth renders the protected route — the API interceptor will
+      // silently refresh the token on the first request using the httpOnly refresh
+      // cookie. Clearing isAuthenticated here causes an immediate redirect to /login
+      // before the refresh can happen, which is the root cause of the "stuck on login"
+      // bug.
       onRehydrateStorage: () => (state) => {
         if (state && state.accessToken) {
           const expiry = getTokenExpiry(state.accessToken);
-          // Give a 30-second buffer — if token expires within 30s treat as expired
-          if (expiry === 0 || expiry < Date.now() + 30_000) {
-            // Stored token is invalid/expired. Clear the full auth state to avoid
-            // rendering protected routes with stale user/isAuthenticated values.
+          // Only clear if the token is completely invalid (expiry === 0 means bad format)
+          // Expired tokens (expiry < now) are fine — the refresh interceptor handles them
+          if (expiry === 0) {
             state.accessToken = null;
             state.user = null;
             state.isAuthenticated = false;

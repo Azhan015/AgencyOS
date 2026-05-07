@@ -8,7 +8,11 @@
     "build": "tsc",
     "start": "node dist/server.js",
     "lint": "eslint src --ext .ts",
-    "test": "jest --runInBand"
+    "test": "jest --config jest.config.ts --runInBand",
+    "test:unit": "jest --config jest.config.ts --runInBand --testPathPattern=unit",
+    "test:integration": "jest --config jest.config.ts --runInBand --testPathPattern=integration",
+    "test:system": "jest --config jest.config.ts --runInBand --testPathPattern=system",
+    "test:coverage": "jest --config jest.config.ts --runInBand --coverage"
   },
   "dependencies": {
     "@aws-sdk/client-s3": "3.490.0",
@@ -106,6 +110,7 @@
     "@typescript-eslint/parser": "6.19.1",
     "eslint": "8.56.0",
     "jest": "29.7.0",
+    "mongodb-memory-server": "^9.4.1",
     "supertest": "6.3.4",
     "ts-jest": "29.1.2",
     "ts-node": "10.9.2",

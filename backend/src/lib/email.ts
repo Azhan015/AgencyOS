@@ -45,8 +45,18 @@ function getTransporter(): nodemailer.Transporter {
 export async function sendEmail(options: EmailOptions): Promise<void> {
   try {
     const transport = getTransporter();
+
+    // When using Gmail SMTP, the From address MUST match the authenticated Gmail
+    // account (SMTP_USER). Gmail ignores/overrides any other From address and
+    // marks the email as spam if they don't match. We use the configured
+    // EMAIL_FROM_NAME for display but force the address to SMTP_USER when set.
+    const fromAddress =
+      env.SMTP_HOST?.includes('gmail') && env.SMTP_USER
+        ? `"${env.EMAIL_FROM_NAME}" <${env.SMTP_USER}>`
+        : `"${env.EMAIL_FROM_NAME}" <${env.EMAIL_FROM}>`;
+
     const info = await transport.sendMail({
-      from: `"${env.EMAIL_FROM_NAME}" <${env.EMAIL_FROM}>`,
+      from: fromAddress,
       to: Array.isArray(options.to) ? options.to.join(', ') : options.to,
       subject: options.subject,
       html: options.html,

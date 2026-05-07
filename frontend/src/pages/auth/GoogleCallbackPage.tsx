@@ -29,23 +29,21 @@ export function GoogleCallbackPage() {
     if (errorParam) {
       setError('Google sign-in failed. Please try again.');
       toast.error('Google sign-in failed');
-      setTimeout(() => navigate('/auth/login'), 2000);
+      setTimeout(() => navigate('/auth/login?error=google_failed'), 2000);
       return;
     }
 
     if (!token) {
       setError('No token received from Google. Please try again.');
-      setTimeout(() => navigate('/auth/login'), 2000);
+      setTimeout(() => navigate('/auth/login?error=google_failed'), 2000);
       return;
     }
 
     // Store token first so the api interceptor picks it up
     useAuthStore.getState().setAccessToken(token);
 
-    // Use absolute URL — this page may load before the Vite proxy is ready
-    const apiBase = import.meta.env.VITE_API_URL || `${import.meta.env.VITE_BACKEND_URL || 'http://localhost:5000'}/api/v1`;
-
-    fetch(`${apiBase}/auth/me`, {
+    // Use relative URL — works through Vite proxy (dev) and nginx proxy (Docker)
+    fetch('/api/v1/auth/me', {
       headers: { Authorization: `Bearer ${token}` },
       credentials: 'include',
     })
@@ -55,12 +53,12 @@ export function GoogleCallbackPage() {
         const user = res.data;
         login(
           {
-            id: user._id ?? user.id,
-            email: user.email,
-            name: user.name,
-            role: user.role,
-            clientId: user.clientId,
-            avatar: user.avatar,
+            id: String(user._id ?? user.id ?? ''),
+            email: String(user.email ?? ''),
+            name: String(user.name ?? 'User'),
+            role: String(user.role ?? 'CLIENT'),
+            clientId: user.clientId ? String(user.clientId) : undefined,
+            avatar: typeof user.avatar === 'string' ? user.avatar : undefined,
           },
           token
         );
@@ -70,7 +68,7 @@ export function GoogleCallbackPage() {
       .catch(() => {
         setError('Failed to load your profile. Please try signing in again.');
         useAuthStore.getState().logout();
-        setTimeout(() => navigate('/auth/login'), 2500);
+        setTimeout(() => navigate('/auth/login?error=google_failed'), 2500);
       });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);

@@ -94,7 +94,8 @@ const parsed = envSchema.safeParse(process.env);
 
 if (!parsed.success) {
   console.error('❌ Invalid environment variables:');
-  console.error(parsed.error.flatten().fieldErrors);
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  console.error((parsed as any).error.flatten().fieldErrors);
   process.exit(1);
 }
 

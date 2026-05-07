@@ -7,6 +7,15 @@ import { validateBody } from '../../middleware/validate';
 
 const router = Router();
 
+const dateOrDatetime = z
+  .string()
+  .optional()
+  .refine(
+    (v) => !v || !isNaN(Date.parse(v)),
+    { message: 'Invalid date' }
+  )
+  .transform((v) => (v ? new Date(v) : undefined));
+
 const createProjectSchema = z.object({
   name: z.string().min(1).max(200),
   clientId: z.string().min(1),
@@ -15,13 +24,13 @@ const createProjectSchema = z.object({
   contributors: z.array(z.string()).optional(),
   budget: z.number().min(0).optional(),
   currency: z.string().length(3).optional(),
-  startDate: z.string().datetime().optional(),
-  endDate: z.string().datetime().optional(),
+  startDate: dateOrDatetime,
+  endDate: dateOrDatetime,
   description: z.string().max(2000).optional(),
   tags: z.array(z.string()).optional(),
   milestones: z.array(z.object({
     name: z.string().min(1),
-    dueDate: z.string().datetime(),
+    dueDate: z.string().refine((v) => !isNaN(Date.parse(v)), { message: 'Invalid date' }).transform((v) => new Date(v)),
     invoiceAmount: z.number().min(0).optional(),
     triggerInvoice: z.boolean().optional(),
     order: z.number().optional(),
@@ -30,7 +39,7 @@ const createProjectSchema = z.object({
 
 const milestoneSchema = z.object({
   name: z.string().min(1),
-  dueDate: z.string().datetime(),
+  dueDate: z.string().refine((v) => !isNaN(Date.parse(v)), { message: 'Invalid date' }).transform((v) => new Date(v)),
   invoiceAmount: z.number().min(0).optional(),
   triggerInvoice: z.boolean().optional(),
   order: z.number().optional(),

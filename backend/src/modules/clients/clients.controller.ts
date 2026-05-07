@@ -54,8 +54,30 @@ export async function invite(req: AuthRequest, res: Response, next: NextFunction
 
 export async function acceptInvite(req: AuthRequest, res: Response, next: NextFunction): Promise<void> {
   try {
+    const { env } = await import('../../config/env');
     const result = await service.acceptInvite(req.body.token, req.body.password);
-    res.json({ success: true, data: result });
+
+    // Set refresh token as httpOnly cookie (same options as auth controller)
+    const cookieOptions = {
+      httpOnly: true,
+      secure: env.NODE_ENV === 'production',
+      sameSite: 'lax' as const,
+      maxAge: 7 * 24 * 60 * 60 * 1000,
+      ...(env.NODE_ENV === 'production' && env.COOKIE_DOMAIN !== 'localhost'
+        ? { domain: env.COOKIE_DOMAIN }
+        : {}),
+    };
+    res.cookie('refreshToken', result.refreshToken, cookieOptions);
+
+    res.json({
+      success: true,
+      data: {
+        userId: result.userId,
+        clientId: result.clientId,
+        accessToken: result.accessToken,
+        user: result.user,
+      },
+    });
   } catch (error) { next(error); }
 }
 

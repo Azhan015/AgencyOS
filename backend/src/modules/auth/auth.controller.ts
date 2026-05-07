@@ -105,7 +105,9 @@ export async function sendMagicLink(req: Request, res: Response, next: NextFunct
   try {
     const { email } = req.body;
     await authService.sendMagicLink(email, getFrontendUrl(req));
-    res.json({ success: true, message: 'If that email exists, a magic link has been sent' });
+    // Always return the same message regardless of whether the email exists —
+    // this prevents email enumeration attacks.
+    res.json({ success: true, message: 'If that email is registered, a magic link has been sent' });
   } catch (error) {
     next(error);
   }

@@ -4,6 +4,7 @@ import { uploadFile, generateStorageKey } from '../config/storage';
 import { env } from '../config/env';
 import { logger } from '../lib/logger';
 import { isRedisAvailable } from '../config/redis';
+import { getBullRedisOptions } from '../config/bullRedis';
 
 // Lazy-initialized Bull queue — only created when Redis is available
 let invoiceQueue: import('bull').Queue | null = null;
@@ -13,7 +14,7 @@ function getInvoiceQueue(): import('bull').Queue | null {
   if (!invoiceQueue) {
     const Bull = require('bull');
     invoiceQueue = new Bull('invoice', {
-      redis: env.REDIS_URL,
+      redis: getBullRedisOptions(),
       defaultJobOptions: {
         attempts: 3,
         backoff: { type: 'exponential', delay: 5000 },

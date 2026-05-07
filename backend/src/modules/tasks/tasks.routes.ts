@@ -6,14 +6,14 @@ import * as service from './tasks.service';
 const router = Router();
 router.use(authenticate);
 
-router.get('/', authorize('projects:read'), async (req: AuthRequest, res, next) => {
+router.get('/', authorize('tasks:read'), async (req: AuthRequest, res, next) => {
   try {
     const tasks = await service.listTasks(req.query as Record<string, string>);
     res.json({ success: true, data: tasks });
   } catch (e) { next(e); }
 });
 
-router.post('/', authorize('projects:write'), async (req: AuthRequest, res, next) => {
+router.post('/', authorize('tasks:write'), async (req: AuthRequest, res, next) => {
   try {
     const task = await service.createTask({ ...req.body, createdBy: req.user!.id });
     res.status(201).json({ success: true, data: task });
@@ -21,7 +21,7 @@ router.post('/', authorize('projects:write'), async (req: AuthRequest, res, next
 });
 
 // Static sub-path BEFORE /:id to avoid param collision
-router.post('/reorder', authorize('projects:write'), async (req: AuthRequest, res, next) => {
+router.post('/reorder', authorize('tasks:write'), async (req: AuthRequest, res, next) => {
   try {
     await service.reorderTasks(req.body.tasks);
     res.json({ success: true });
@@ -29,21 +29,22 @@ router.post('/reorder', authorize('projects:write'), async (req: AuthRequest, re
 });
 
 // Parameterised routes
-router.get('/:id', authorize('projects:read'), async (req: AuthRequest, res, next) => {
+router.get('/:id', authorize('tasks:read'), async (req: AuthRequest, res, next) => {
   try {
     const task = await service.getTask(req.params.id);
     res.json({ success: true, data: task });
   } catch (e) { next(e); }
 });
 
-router.patch('/:id', authorize('projects:write'), async (req: AuthRequest, res, next) => {
+router.patch('/:id', authorize('tasks:write'), async (req: AuthRequest, res, next) => {
   try {
-    const task = await service.updateTask(req.params.id, req.body);
+    // Pass the acting user's ID so we can record who completed the task
+    const task = await service.updateTask(req.params.id, req.body, req.user!.id);
     res.json({ success: true, data: task });
   } catch (e) { next(e); }
 });
 
-router.delete('/:id', authorize('projects:write'), async (req: AuthRequest, res, next) => {
+router.delete('/:id', authorize('tasks:write'), async (req: AuthRequest, res, next) => {
   try {
     await service.deleteTask(req.params.id);
     res.json({ success: true, message: 'Task deleted' });
