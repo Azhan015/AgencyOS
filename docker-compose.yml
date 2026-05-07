@@ -1,6 +1,11 @@
 version: '3.8'
 
 services:
+  # ── MongoDB (containerised) ───────────────────────────────────────────────
+  # Used when running the full stack via docker-compose.
+  # The backend MONGODB_URI is overridden below to point at this service.
+  # If you prefer MongoDB Atlas, set USE_ATLAS=true in backend/.env and
+  # put your Atlas URI in MONGODB_URI_ATLAS — the override won't apply.
   mongodb:
     image: mongo:7.0
     container_name: agency-os-mongo
@@ -13,7 +18,14 @@ services:
       MONGO_INITDB_DATABASE: agency-os
     networks:
       - agency-os-network
+    healthcheck:
+      test: ["CMD", "mongosh", "--eval", "db.adminCommand('ping')"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
 
+  # ── Redis ─────────────────────────────────────────────────────────────────
   redis:
     image: redis:7.2-alpine
     container_name: agency-os-redis
@@ -25,7 +37,14 @@ services:
     command: redis-server --appendonly yes
     networks:
       - agency-os-network
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
 
+  # ── Backend ───────────────────────────────────────────────────────────────
   backend:
     build:
       context: ./backend
@@ -36,21 +55,32 @@ services:
       - "5000:5000"
     env_file:
       - ./backend/.env
-    # NOTE: The environment block below overrides .env values.
-    # We intentionally do NOT override MONGODB_URI here so the value
-    # from backend/.env is used (your local MongoDB via host.docker.internal).
-    # Only REDIS_URL is overridden to use the containerised Redis service.
-    environment:
-      REDIS_URL: redis://redis:6379
-    # host.docker.internal works natively on Mac/Windows Docker Desktop.
-    # On Linux this extra_hosts entry maps it to the host gateway IP.
-    extra_hosts:
-      - "host.docker.internal:host-gateway"
+    # These environment variables OVERRIDE the values in backend/.env when
+    # running via docker-compose. This ensures the backend always connects to
+    # the containerised MongoDB and Redis services, not localhost.
+    #
+    # Currently using: Atlas (MongoDB) + Upstash (Redis) from backend/.env
+    # To switch to local containers instead, uncomment the environment block:
+    #
+    # environment:
+    #   MONGODB_URI: mongodb://mongodb:27017/agency-os
+    #   REDIS_URL: redis://redis:6379
+    #   BULL_REDIS_URL: redis://redis:6379
     depends_on:
-      - redis
+      mongodb:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
     networks:
       - agency-os-network
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:5000/health"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
 
+  # ── Frontend ──────────────────────────────────────────────────────────────
   frontend:
     build:
       context: ./frontend
@@ -60,7 +90,8 @@ services:
     ports:
       - "3000:80"
     depends_on:
-      - backend
+      backend:
+        condition: service_healthy
     networks:
       - agency-os-network
 

@@ -43,6 +43,20 @@ const resetPasswordSchema = z.object({
   password: z.string().min(8).max(128),
 });
 
+// ── Registration status — public endpoint ─────────────────────────────────
+// Returns whether the public register endpoint is currently open.
+// The frontend uses this to decide whether to show the register form or a
+// "registration closed" message.
+// open: true  → no users exist yet, first-time setup allowed
+// open: false → a SUPERADMIN already exists, registration is locked
+router.get('/registration-status', async (_req, res, next) => {
+  try {
+    const { isRegistrationOpen } = await import('./auth.service');
+    const open = await isRegistrationOpen();
+    res.json({ success: true, data: { open } });
+  } catch (e) { next(e); }
+});
+
 router.post('/register', authLimiter, validateBody(registerSchema), controller.register);
 router.post('/login', authLimiter, validateBody(loginSchema), controller.login);
 router.post('/refresh', controller.refresh);

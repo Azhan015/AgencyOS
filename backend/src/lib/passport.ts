@@ -63,6 +63,19 @@ export function initPassport(): void {
             return done(null, user as unknown as Express.User);
           }
 
+          // ── Registration gate ──────────────────────────────────────────
+          // New Google users can only be created when no users exist yet
+          // (first-time setup). After that, the SUPERADMIN adds users via
+          // the admin dashboard — they cannot self-register via Google.
+          const userCount = await User.countDocuments();
+          if (userCount > 0) {
+            logger.warn({ email }, 'Google OAuth blocked — registration is locked');
+            return done(
+              new Error('Registration is closed. Contact your agency administrator to get access.'),
+              undefined
+            );
+          }
+
           // Create new user from Google profile
           // Derive a safe name: displayName → given+family → email prefix → 'User'
           const derivedName =
@@ -71,16 +84,20 @@ export function initPassport(): void {
             email.split('@')[0] ||
             'User';
 
+          // First user via Google → SUPERADMIN
           const newUser = await User.create({
             email,
             name: derivedName,
             googleId: profile.id,
             avatar: profile.photos?.[0]?.value,
-            role: 'CLIENT', // Default role — promote via admin panel
+            role: 'SUPERADMIN',
             isActive: true,
           });
 
-          logger.info({ email, googleId: profile.id }, 'New user created via Google OAuth');
+          logger.info(
+            { email, googleId: profile.id },
+            '🎉 First account created via Google OAuth — assigned SUPERADMIN role. Registration is now locked.'
+          );
           return done(null, newUser as unknown as Express.User);
         } catch (error) {
           logger.error({ error }, 'Google OAuth strategy error');

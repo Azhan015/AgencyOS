@@ -1,13 +1,14 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { Link } from 'react-router-dom';
 import { useForm } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import { z } from 'zod';
-import { Eye, EyeOff, Mail, Lock, User, AlertCircle } from 'lucide-react';
+import { Eye, EyeOff, Mail, Lock, User, AlertCircle, ShieldOff } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { useRegister } from '@/hooks/useAuth';
 import { Logo } from '@/components/ui/logo';
+import axios from 'axios';
 
 const registerSchema = z.object({
   name: z.string().min(1, 'Name is required').max(100, 'Name too long'),
@@ -45,15 +46,33 @@ function GoogleIcon() {
   );
 }
 
+type RegistrationStatus = 'loading' | 'open' | 'locked';
+
 export function RegisterPage() {
   const [showPassword, setShowPassword] = useState(false);
   const [showConfirm, setShowConfirm] = useState(false);
   const [registerError, setRegisterError] = useState<string | null>(null);
+  const [registrationStatus, setRegistrationStatus] = useState<RegistrationStatus>('loading');
   const register = useRegister();
 
   const { register: formRegister, handleSubmit, formState: { errors } } = useForm<RegisterForm>({
     resolver: zodResolver(registerSchema),
   });
+
+  // Check whether registration is open before rendering the form
+  useEffect(() => {
+    const apiUrl = import.meta.env.VITE_API_URL || 'http://localhost:5000/api/v1';
+    axios
+      .get(`${apiUrl}/auth/registration-status`)
+      .then((res) => {
+        setRegistrationStatus(res.data?.data?.open ? 'open' : 'locked');
+      })
+      .catch(() => {
+        // If the check fails (network error, server down), default to showing
+        // the form — the server will reject the request if registration is locked.
+        setRegistrationStatus('open');
+      });
+  }, []);
 
   const onSubmit = (data: RegisterForm) => {
     setRegisterError(null);
@@ -66,8 +85,10 @@ export function RegisterPage() {
             (error as { response?: { data?: { error?: { message?: string } } } })?.response?.data
               ?.error?.message;
 
-          if (status === 409) {
-            // Email already exists — check if it's a Google account
+          if (status === 403) {
+            // Registration is locked — update UI state
+            setRegistrationStatus('locked');
+          } else if (status === 409) {
             setRegisterError(
               'An account with this email already exists. If you signed up with Google, please use "Continue with Google" to sign in. Otherwise, go to the sign-in page.'
             );
@@ -84,6 +105,56 @@ export function RegisterPage() {
   const currentOrigin = window.location.origin;
   const googleAuthUrl = `${backendUrl}/api/v1/auth/google?origin=${encodeURIComponent(currentOrigin)}`;
 
+  // ── Loading state ──────────────────────────────────────────────────────────
+  if (registrationStatus === 'loading') {
+    return (
+      <div className="min-h-screen flex items-center justify-center">
+        <div className="animate-pulse text-muted-foreground text-sm">Checking setup status…</div>
+      </div>
+    );
+  }
+
+  // ── Registration locked ────────────────────────────────────────────────────
+  if (registrationStatus === 'locked') {
+    return (
+      <div className="min-h-screen flex">
+        <div className="flex-1 flex items-center justify-center p-8">
+          <div className="w-full max-w-sm text-center">
+            <Logo size="lg" showText={false} className="mb-6 mx-auto" />
+            <div className="flex items-center justify-center mb-4">
+              <div className="h-16 w-16 rounded-full bg-muted flex items-center justify-center">
+                <ShieldOff className="h-8 w-8 text-muted-foreground" />
+              </div>
+            </div>
+            <h1 className="text-2xl font-bold mb-2">Registration is closed</h1>
+            <p className="text-muted-foreground text-sm mb-6 leading-relaxed">
+              This agency already has an admin account. New team members and clients
+              are added by the administrator through the admin dashboard — not through
+              this page.
+            </p>
+            <p className="text-muted-foreground text-sm mb-8">
+              If you were invited, check your email for a sign-in link.
+            </p>
+            <Button asChild className="w-full">
+              <Link to="/auth/login">Go to sign in</Link>
+            </Button>
+          </div>
+        </div>
+
+        {/* Right: Visual */}
+        <div className="hidden lg:flex flex-1 bg-gradient-to-br from-primary/10 via-primary/5 to-background items-center justify-center p-12">
+          <div className="max-w-md text-center">
+            <h2 className="text-xl font-semibold mb-2">Your agency, unified</h2>
+            <p className="text-muted-foreground text-sm">
+              Projects, invoices, files, and client communication — all in one place.
+            </p>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  // ── Registration open (first-time setup) ──────────────────────────────────
   return (
     <div className="min-h-screen flex">
       {/* Left: Form */}
@@ -98,9 +169,11 @@ export function RegisterPage() {
 
           {/* Admin-only notice */}
           <div className="mb-5 rounded-lg border border-amber-200 bg-amber-50 dark:border-amber-800 dark:bg-amber-950/30 px-4 py-3 text-sm text-amber-800 dark:text-amber-400">
-            <p className="font-medium mb-0.5">For agency owners only</p>
+            <p className="font-medium mb-0.5">First-time setup — agency owner only</p>
             <p className="text-xs leading-relaxed opacity-90">
-              This page creates the initial admin account. Team members and clients are added by the admin after setup — they do not register here.
+              This creates the initial superadmin account. Once created, registration
+              is locked. Team members and clients are added by you through the admin
+              dashboard after setup.
             </p>
           </div>
 
@@ -177,7 +250,7 @@ export function RegisterPage() {
             />
 
             <Button type="submit" className="w-full" loading={register.isPending}>
-              Create account
+              Create superadmin account
             </Button>
           </form>
 

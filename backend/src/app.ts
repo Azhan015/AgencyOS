@@ -97,9 +97,12 @@ app.get('/health', (_req, res) => {
   });
 });
 
-// Bootstrap superadmin — only works when NO superadmin exists in the DB.
+// Bootstrap superadmin — only works when NO users exist in the DB.
+// NOTE: With the new registration flow, the first account created via
+// POST /api/v1/auth/register is automatically assigned SUPERADMIN.
+// This endpoint is kept as a fallback for edge cases (e.g. you registered
+// via an old version and need to promote an existing account).
 // Call: POST /api/v1/auth/bootstrap-superadmin  { email: "you@example.com" }
-// This promotes the user with that email to SUPERADMIN.
 // Once a SUPERADMIN exists this endpoint returns 403.
 app.post(`/api/${env.API_VERSION}/auth/bootstrap-superadmin`, async (req, res, next) => {
   try {
@@ -124,46 +127,6 @@ app.post(`/api/${env.API_VERSION}/auth/bootstrap-superadmin`, async (req, res, n
       return;
     }
     res.json({ success: true, data: user, message: `${user.name} (${user.email}) has been promoted to SUPERADMIN` });
-  } catch (e) { next(e); }
-});
-
-// ── Dev-only: set password directly without email/Redis ──────────────────────
-// Use this when you're locked out and can't receive reset emails.
-// Only works in NODE_ENV=development. Disabled in production automatically.
-// Call: POST /api/v1/auth/dev-set-password  { email: "you@example.com", password: "newpassword" }
-app.post(`/api/${env.API_VERSION}/auth/dev-set-password`, async (req, res, next) => {
-  try {
-    if (env.NODE_ENV !== 'development') {
-      res.status(403).json({ success: false, error: { message: 'Only available in development mode' } });
-      return;
-    }
-    const { email, password } = req.body;
-    if (!email || !password) {
-      res.status(400).json({ success: false, error: { message: 'email and password are required' } });
-      return;
-    }
-    if (password.length < 8) {
-      res.status(400).json({ success: false, error: { message: 'password must be at least 8 characters' } });
-      return;
-    }
-    const { User } = await import('./models/User');
-    const argon2 = await import('argon2');
-    const passwordHash = await argon2.hash(password, {
-      type: argon2.argon2id,
-      memoryCost: 65536,
-      timeCost: 3,
-      parallelism: 4,
-    });
-    const user = await User.findOneAndUpdate(
-      { email: email.toLowerCase().trim() },
-      { passwordHash },
-      { new: true }
-    ).select('-passwordHash');
-    if (!user) {
-      res.status(404).json({ success: false, error: { message: 'No user found with that email' } });
-      return;
-    }
-    res.json({ success: true, message: `Password set for ${user.email}. You can now sign in with email + password.` });
   } catch (e) { next(e); }
 });
 
