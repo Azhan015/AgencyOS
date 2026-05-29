@@ -4,37 +4,47 @@
  */
 import { connectTestDb, clearTestDb, disconnectTestDb } from '../setup/testDb';
 import { User } from '../../models/User';
+import { getOrCreateTestOrg, resetTestOrgCache } from '../setup/testFixtures';
+import mongoose from 'mongoose';
+
+let testOrgId: mongoose.Types.ObjectId;
 
 beforeAll(async () => { await connectTestDb(); });
-afterEach(async () => { await clearTestDb(); });
+beforeEach(async () => { testOrgId = await getOrCreateTestOrg(); });
+afterEach(async () => { await clearTestDb(); resetTestOrgCache(); });
 afterAll(async () => { await disconnectTestDb(); });
+
+// Helper: create a user with org context
+function makeUser(overrides: Record<string, unknown> = {}) {
+  return { role: 'CLIENT', orgRole: 'CLIENT', organizationId: testOrgId, ...overrides };
+}
 
 describe('User model', () => {
   // ── Creation ───────────────────────────────────────────────────────────────
   describe('create', () => {
     it('creates a user with required fields', async () => {
-      const user = await User.create({ email: 'a@test.com', name: 'Alice', role: 'CLIENT' });
+      const user = await User.create(makeUser({ email: 'a@test.com', name: 'Alice' }));
       expect(user._id).toBeDefined();
       expect(user.email).toBe('a@test.com');
       expect(user.isActive).toBe(true);
     });
 
     it('lowercases email on save', async () => {
-      const user = await User.create({ email: 'UPPER@TEST.COM', name: 'U', role: 'CLIENT' });
+      const user = await User.create(makeUser({ email: 'UPPER@TEST.COM', name: 'U' }));
       expect(user.email).toBe('upper@test.com');
     });
 
-    it('rejects duplicate email', async () => {
-      await User.create({ email: 'dup@test.com', name: 'D1', role: 'CLIENT' });
-      await expect(User.create({ email: 'dup@test.com', name: 'D2', role: 'CLIENT' })).rejects.toThrow();
+    it('rejects duplicate email within same org', async () => {
+      await User.create(makeUser({ email: 'dup@test.com', name: 'D1' }));
+      await expect(User.create(makeUser({ email: 'dup@test.com', name: 'D2' }))).rejects.toThrow();
     });
 
     it('rejects invalid role', async () => {
-      await expect(User.create({ email: 'x@test.com', name: 'X', role: 'INVALID_ROLE' })).rejects.toThrow();
+      await expect(User.create(makeUser({ email: 'x@test.com', name: 'X', role: 'INVALID_ROLE' }))).rejects.toThrow();
     });
 
     it('defaults isActive to true', async () => {
-      const user = await User.create({ email: 'b@test.com', name: 'B', role: 'ADMIN' });
+      const user = await User.create(makeUser({ email: 'b@test.com', name: 'B', role: 'ADMIN', orgRole: 'ORGANIZATION_ADMIN' }));
       expect(user.isActive).toBe(true);
     });
   });
@@ -42,7 +52,7 @@ describe('User model', () => {
   // ── findByEmail static ─────────────────────────────────────────────────────
   describe('findByEmail', () => {
     it('finds user by email (case-insensitive)', async () => {
-      await User.create({ email: 'find@test.com', name: 'F', role: 'CLIENT' });
+      await User.create(makeUser({ email: 'find@test.com', name: 'F' }));
       const found = await User.findByEmail('FIND@TEST.COM');
       expect(found).not.toBeNull();
       expect(found!.email).toBe('find@test.com');
@@ -57,7 +67,7 @@ describe('User model', () => {
   // ── toSafeObject ──────────────────────────────────────────────────────────
   describe('toSafeObject', () => {
     it('excludes passwordHash, passwordResetToken, __v', async () => {
-      const user = await User.create({ email: 'safe@test.com', name: 'S', role: 'CLIENT' });
+      const user = await User.create(makeUser({ email: 'safe@test.com', name: 'S' }));
       const safe = user.toSafeObject() as Record<string, unknown>;
       expect(safe.passwordHash).toBeUndefined();
       expect(safe.passwordResetToken).toBeUndefined();
@@ -69,7 +79,7 @@ describe('User model', () => {
   // ── comparePassword ────────────────────────────────────────────────────────
   describe('comparePassword', () => {
     it('returns false when no passwordHash is set', async () => {
-      const user = await User.create({ email: 'nopw@test.com', name: 'N', role: 'CLIENT' });
+      const user = await User.create(makeUser({ email: 'nopw@test.com', name: 'N' }));
       expect(await user.comparePassword('anything')).toBe(false);
     });
   });
@@ -77,7 +87,7 @@ describe('User model', () => {
   // ── devices ───────────────────────────────────────────────────────────────
   describe('devices array', () => {
     it('starts empty', async () => {
-      const user = await User.create({ email: 'dev@test.com', name: 'D', role: 'CLIENT' });
+      const user = await User.create(makeUser({ email: 'dev@test.com', name: 'D' }));
       expect(user.devices).toHaveLength(0);
     });
   });

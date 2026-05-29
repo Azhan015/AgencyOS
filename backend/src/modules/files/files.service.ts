@@ -1,22 +1,28 @@
 import multer from 'multer';
 import path from 'path';
-import { v4 as uuidv4 } from 'uuid';
 import { File, IFile } from '../../models/File';
 import { Client } from '../../models/Client';
-import { uploadFile, getSignedDownloadUrl, deleteFile as deleteFromStorage, generateStorageKey } from '../../config/storage';
+import { Organization } from '../../models/Organization';
+import {
+  uploadFile,
+  getOrgSignedDownloadUrl,
+  getSignedDownloadUrl,
+  deleteFile as deleteFromStorage,
+  generateProjectFileKey,
+  generateStorageKey,
+  validateStorageKeyOwnership,
+} from '../../config/storage';
 import { NotFoundError, FileError, AuthorizationError } from '../../lib/errors';
-import { createNotification } from '../notifications/notifications.service';
 import { emitAutomationEvent } from '../automations/automations.service';
-import { getSocketServer } from '../../sockets/socketServer';
+import { emitToOrgProject } from '../../sockets/socketServer';
 import { logger } from '../../lib/logger';
 import { env } from '../../config/env';
 
-// Multer config — memory storage for virus scan before S3
+// ── Multer config — memory storage for virus scan before S3 ───────────────────
 export const upload = multer({
   storage: multer.memoryStorage(),
   limits: { fileSize: env.MAX_FILE_SIZE_BYTES },
   fileFilter: (_req, file, cb) => {
-    // Block dangerous executables
     const blocked = ['.exe', '.bat', '.cmd', '.sh', '.ps1', '.vbs', '.js', '.jar'];
     const ext = path.extname(file.originalname).toLowerCase();
     if (blocked.includes(ext)) {
@@ -27,6 +33,8 @@ export const upload = multer({
   },
 });
 
+// ── Upload ─────────────────────────────────────────────────────────────────────
+
 export async function uploadFileToProject(data: {
   projectId: string;
   clientId: string;
@@ -36,18 +44,41 @@ export async function uploadFileToProject(data: {
   buffer: Buffer;
   folder?: string;
   isClientVisible?: boolean;
-  existingFileId?: string; // for new version
+  existingFileId?: string;
+  organizationId?: string;
 }): Promise<IFile> {
-  const { projectId, clientId, uploadedBy, originalName, mimeType, buffer, folder = '/', isClientVisible = false, existingFileId } = data;
+  const {
+    projectId, clientId, uploadedBy, originalName, mimeType, buffer,
+    folder = '/', isClientVisible = false, existingFileId, organizationId,
+  } = data;
 
-  // Check storage quota
+  // ── 1. Check org-level storage quota (primary) ─────────────────────────────
+  if (organizationId) {
+    const org = await Organization.findById(organizationId)
+      .select('usage limits name plan')
+      .lean();
+
+    if (org && org.limits.storageBytes !== -1) {
+      if (org.usage.storageUsedBytes + buffer.length > org.limits.storageBytes) {
+        const usedGB = (org.usage.storageUsedBytes / 1024 ** 3).toFixed(2);
+        const limitGB = (org.limits.storageBytes / 1024 ** 3).toFixed(0);
+        throw new FileError(
+          `Organization storage quota exceeded. Used: ${usedGB}GB / ${limitGB}GB. ` +
+          `Upgrade your plan to add more storage.`
+        );
+      }
+    }
+  }
+
+  // ── 2. Check client-level storage quota (secondary) ───────────────────────
   const client = await Client.findById(clientId);
   if (!client) throw new NotFoundError('Client');
 
   if (client.storageUsedBytes + buffer.length > client.storageLimitBytes) {
-    throw new FileError('Storage quota exceeded');
+    throw new FileError('Client storage quota exceeded');
   }
 
+  // ── 3. Resolve version info ────────────────────────────────────────────────
   let version = 1;
   let parentFileId: string | undefined;
 
@@ -59,14 +90,21 @@ export async function uploadFileToProject(data: {
     }
   }
 
-  // Generate storage key
-  const ext = path.extname(originalName);
-  const storageKey = generateStorageKey(`projects/${projectId}/${folder}`, `${uuidv4()}${ext}`);
+  // ── 4. Generate org-scoped storage key ────────────────────────────────────
+  // New uploads use org-scoped keys: organizations/{orgId}/projects/{projectId}/...
+  // Legacy uploads (no orgId) fall back to the old key format.
+  const storageKey = organizationId
+    ? generateProjectFileKey(organizationId, projectId, folder, originalName)
+    : generateStorageKey(`projects/${projectId}/${folder}`, originalName);
 
-  // Upload to S3/R2
-  await uploadFile(storageKey, buffer, mimeType);
+  // ── 5. Upload to S3/R2 with server-side encryption ────────────────────────
+  await uploadFile(storageKey, buffer, mimeType, {
+    organizationId: organizationId ?? '',
+    projectId,
+    uploadedBy,
+  });
 
-  // Create file record
+  // ── 6. Create file record ──────────────────────────────────────────────────
   const file = await File.create({
     projectId,
     clientId,
@@ -81,21 +119,27 @@ export async function uploadFileToProject(data: {
     parentFileId,
     isClientVisible,
     scanStatus: 'PENDING',
+    ...(organizationId ? { organizationId } : {}),
   });
 
-  // Update client storage usage
-  await Client.findByIdAndUpdate(clientId, {
-    $inc: { storageUsedBytes: buffer.length },
-  });
+  // ── 7. Update storage usage counters ──────────────────────────────────────
+  // Update both client and org usage atomically
+  await Promise.all([
+    Client.findByIdAndUpdate(clientId, { $inc: { storageUsedBytes: buffer.length } }),
+    organizationId
+      ? Organization.findByIdAndUpdate(organizationId, {
+          $inc: { 'usage.storageUsedBytes': buffer.length },
+        })
+      : Promise.resolve(),
+  ]);
 
-  // Queue virus scan
+  // ── 8. Queue virus scan ────────────────────────────────────────────────────
   try {
     const { scanQueue } = await import('../../workers/scanWorker');
     const queue = scanQueue();
     if (queue) {
       await queue.add({ fileId: file._id.toString(), storageKey });
     } else {
-      // Redis not available — mark clean immediately
       await File.findByIdAndUpdate(file._id, { scanStatus: 'CLEAN' });
     }
   } catch (err) {
@@ -103,10 +147,9 @@ export async function uploadFileToProject(data: {
     await File.findByIdAndUpdate(file._id, { scanStatus: 'CLEAN' });
   }
 
-  // Emit socket event
+  // ── 9. Emit socket event ───────────────────────────────────────────────────
   try {
-    const io = getSocketServer();
-    io.to(`project:${projectId}`).emit('file:uploaded', {
+    emitToOrgProject(organizationId ?? '', projectId, 'file:uploaded', {
       fileId: file._id.toString(),
       name: originalName,
       uploadedBy,
@@ -116,18 +159,21 @@ export async function uploadFileToProject(data: {
     logger.warn({ err }, 'Socket emit failed');
   }
 
-  // Notify project members if client-visible
+  // ── 10. Automation event ───────────────────────────────────────────────────
   if (isClientVisible) {
     await emitAutomationEvent('file.uploaded', {
       fileId: file._id.toString(),
       projectId,
       clientId,
       fileName: originalName,
+      organizationId,
     });
   }
 
   return file;
 }
+
+// ── List ───────────────────────────────────────────────────────────────────────
 
 export async function listFiles(query: {
   projectId?: string;
@@ -136,16 +182,16 @@ export async function listFiles(query: {
   userRole?: string;
   page?: number;
   limit?: number;
+  organizationId?: string;
 }) {
-  const { projectId, clientId, folder, userRole, page = 1, limit = 50 } = query;
+  const { projectId, clientId, folder, userRole, page = 1, limit = 50, organizationId } = query;
   const filter: Record<string, unknown> = {};
 
+  if (organizationId) filter.organizationId = organizationId;
   if (projectId) filter.projectId = projectId;
   if (clientId) filter.clientId = clientId;
   if (folder) filter.folder = folder;
   if (userRole === 'CLIENT') filter.isClientVisible = true;
-
-  // Only show latest versions (no parentFileId or is root)
   filter.scanStatus = { $ne: 'INFECTED' };
 
   const [files, total] = await Promise.all([
@@ -161,8 +207,18 @@ export async function listFiles(query: {
   return { files, total, page, limit };
 }
 
-export async function getFile(id: string, userRole?: string, clientId?: string): Promise<IFile> {
-  const file = await File.findById(id).populate('uploadedBy', 'name email avatar');
+// ── Get single file ────────────────────────────────────────────────────────────
+
+export async function getFile(
+  id: string,
+  userRole?: string,
+  clientId?: string,
+  organizationId?: string
+): Promise<IFile> {
+  const filter: Record<string, unknown> = { _id: id };
+  if (organizationId) filter.organizationId = organizationId;
+
+  const file = await File.findOne(filter).populate('uploadedBy', 'name email avatar');
   if (!file) throw new NotFoundError('File');
 
   if (userRole === 'CLIENT') {
@@ -173,8 +229,15 @@ export async function getFile(id: string, userRole?: string, clientId?: string):
   return file;
 }
 
-export async function getDownloadUrl(id: string, userRole?: string, clientId?: string): Promise<string> {
-  const file = await getFile(id, userRole, clientId);
+// ── Download (signed URL) ──────────────────────────────────────────────────────
+
+export async function getDownloadUrl(
+  id: string,
+  userRole?: string,
+  clientId?: string,
+  organizationId?: string
+): Promise<string> {
+  const file = await getFile(id, userRole, clientId, organizationId);
 
   if (file.scanStatus === 'INFECTED') {
     throw new FileError('File is infected and cannot be downloaded');
@@ -183,65 +246,107 @@ export async function getDownloadUrl(id: string, userRole?: string, clientId?: s
     throw new FileError('File is still being scanned');
   }
 
-  // Increment download count
   await File.findByIdAndUpdate(id, { $inc: { downloadCount: 1 } });
 
-  return getSignedDownloadUrl(file.storageKey, 300); // 5 min
+  // Use org-ownership-validated signed URL for org-scoped keys
+  if (organizationId) {
+    return getOrgSignedDownloadUrl(file.storageKey, organizationId, 300);
+  }
+
+  // Legacy fallback for pre-migration keys
+  return getSignedDownloadUrl(file.storageKey, 300);
 }
 
-export async function getFileVersions(fileId: string): Promise<IFile[]> {
-  const file = await File.findById(fileId);
+// ── File versions ──────────────────────────────────────────────────────────────
+
+export async function getFileVersions(
+  fileId: string,
+  organizationId?: string,
+  page = 1,
+  limit = 20
+): Promise<{ versions: IFile[]; total: number; page: number; limit: number }> {
+  const fileFilter: Record<string, unknown> = { _id: fileId };
+  if (organizationId) fileFilter.organizationId = organizationId;
+
+  const file = await File.findOne(fileFilter);
   if (!file) throw new NotFoundError('File');
 
-  // Find all versions of this file (same original name, same project)
-  const versions = await File.find({
+  const versionFilter: Record<string, unknown> = {
     projectId: file.projectId,
     originalName: file.originalName,
     folder: file.folder,
-  }).sort({ version: -1 }).lean();
+  };
+  if (organizationId) versionFilter.organizationId = organizationId;
 
-  return versions as IFile[];
+  const [versions, total] = await Promise.all([
+    File.find(versionFilter)
+      .sort({ version: -1 })
+      .skip((page - 1) * limit)
+      .limit(limit)
+      .lean(),
+    File.countDocuments(versionFilter),
+  ]);
+
+  return { versions: versions as IFile[], total, page, limit };
 }
 
-export async function deleteFile(id: string, userId: string, userRole: string): Promise<void> {
-  const file = await File.findById(id);
+// ── Delete ─────────────────────────────────────────────────────────────────────
+
+export async function deleteFile(
+  id: string,
+  userId: string,
+  userRole: string,
+  organizationId?: string
+): Promise<void> {
+  const filter: Record<string, unknown> = { _id: id };
+  if (organizationId) filter.organizationId = organizationId;
+
+  const file = await File.findOne(filter);
   if (!file) throw new NotFoundError('File');
 
   if (userRole === 'CONTRIBUTOR' && file.uploadedBy.toString() !== userId) {
     throw new AuthorizationError('You can only delete your own files');
   }
 
-  // Delete from storage
+  // Validate storage key ownership before deletion (prevents cross-tenant key injection)
+  if (organizationId && file.storageKey.startsWith('organizations/')) {
+    if (!validateStorageKeyOwnership(file.storageKey, organizationId)) {
+      throw new AuthorizationError('Storage access denied: cross-organization key');
+    }
+  }
+
   try {
     await deleteFromStorage(file.storageKey);
   } catch (err) {
     logger.warn({ err, storageKey: file.storageKey }, 'Failed to delete from storage');
   }
 
-  // Update client storage
-  await Client.findByIdAndUpdate(file.clientId, {
-    $inc: { storageUsedBytes: -file.sizeBytes },
-  });
+  // Decrement both client and org storage usage
+  await Promise.all([
+    Client.findByIdAndUpdate(file.clientId, {
+      $inc: { storageUsedBytes: -file.sizeBytes },
+    }),
+    organizationId
+      ? Organization.findByIdAndUpdate(organizationId, {
+          $inc: { 'usage.storageUsedBytes': -file.sizeBytes },
+        })
+      : Promise.resolve(),
+  ]);
 
   await File.findByIdAndDelete(id);
 }
 
-export async function addAnnotation(fileId: string, data: {
-  x: number;
-  y: number;
-  pageNum?: number;
-  comment: string;
-  authorId: string;
-}): Promise<IFile> {
+// ── Annotations ───────────────────────────────────────────────────────────────
+
+export async function addAnnotation(
+  fileId: string,
+  data: { x: number; y: number; pageNum?: number; comment: string; authorId: string }
+): Promise<IFile> {
   const file = await File.findByIdAndUpdate(
     fileId,
     {
       $push: {
-        annotations: {
-          ...data,
-          pageNum: data.pageNum || 1,
-          createdAt: new Date(),
-        },
+        annotations: { ...data, pageNum: data.pageNum || 1, createdAt: new Date() },
       },
     },
     { new: true }

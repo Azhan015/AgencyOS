@@ -8,8 +8,22 @@ const SALT_LENGTH = 32;
 const KEY_LENGTH = 32;
 
 function getEncryptionKey(): Buffer {
-  const key = env.ENCRYPTION_KEY || 'default-encryption-key-32-chars!!';
-  return Buffer.from(key.padEnd(32, '0').slice(0, 32));
+  const key = env.ENCRYPTION_KEY;
+  if (!key) {
+    if (env.NODE_ENV === 'production') {
+      throw new Error(
+        'ENCRYPTION_KEY environment variable is required in production. ' +
+        'Generate one with: node -e "console.log(require(\'crypto\').randomBytes(32).toString(\'hex\'))"'
+      );
+    }
+    // Development-only fallback — never used in production
+    const devKey = 'dev-only-key-NOT-for-production!!';
+    return Buffer.from(devKey.padEnd(32, '0').slice(0, 32));
+  }
+  if (key.length < 32) {
+    throw new Error('ENCRYPTION_KEY must be at least 32 characters');
+  }
+  return Buffer.from(key.slice(0, 32));
 }
 
 export function encrypt(text: string): string {

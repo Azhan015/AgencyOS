@@ -3,6 +3,7 @@ import { z } from 'zod';
 import * as controller from './projects.controller';
 import { authenticate } from '../../middleware/authenticate';
 import { authorize } from '../../middleware/authorize';
+import { tenantScope } from '../../middleware/tenantScope';
 import { validateBody } from '../../middleware/validate';
 
 const router = Router();
@@ -45,7 +46,7 @@ const milestoneSchema = z.object({
   order: z.number().optional(),
 });
 
-router.use(authenticate);
+router.use(authenticate, tenantScope);
 
 router.get('/', authorize('projects:read'), controller.list);
 router.post('/', authorize('projects:write'), validateBody(createProjectSchema), controller.create);

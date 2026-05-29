@@ -112,7 +112,7 @@ export function SettingsPage() {
                   <div>
                     <p className="font-medium">{user?.name}</p>
                     <p className="text-sm text-muted-foreground">{user?.email}</p>
-                    <p className="text-xs text-muted-foreground mt-0.5">{user?.role}</p>
+                    <p className="text-xs text-muted-foreground mt-0.5">{user?.orgRole ?? user?.role}</p>
                   </div>
                 </div>
                 <div className="space-y-4">

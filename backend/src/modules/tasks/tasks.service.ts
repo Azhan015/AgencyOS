@@ -9,13 +9,18 @@ export async function listTasks(query: {
   status?: string;
   priority?: string;
   milestoneId?: string;
+  organizationId?: string;
 }) {
+  const { projectId, assigneeId, status, priority, milestoneId, organizationId } = query;
+
+  // organizationId is always first
   const filter: Record<string, unknown> = {};
-  if (query.projectId) filter.projectId = query.projectId;
-  if (query.assigneeId) filter.assignees = query.assigneeId;
-  if (query.status) filter.status = query.status;
-  if (query.priority) filter.priority = query.priority;
-  if (query.milestoneId) filter.milestoneId = query.milestoneId;
+  if (organizationId) filter.organizationId = organizationId;
+  if (projectId) filter.projectId = projectId;
+  if (assigneeId) filter.assignees = assigneeId;
+  if (status) filter.status = status;
+  if (priority) filter.priority = priority;
+  if (milestoneId) filter.milestoneId = milestoneId;
 
   return Task.find(filter)
     .populate('assignees', 'name email avatar')
@@ -25,8 +30,11 @@ export async function listTasks(query: {
     .lean();
 }
 
-export async function getTask(id: string): Promise<ITask> {
-  const task = await Task.findById(id)
+export async function getTask(id: string, organizationId?: string): Promise<ITask> {
+  const filter: Record<string, unknown> = { _id: id };
+  if (organizationId) filter.organizationId = organizationId;
+
+  const task = await Task.findOne(filter)
     .populate('assignees', 'name email avatar')
     .populate('createdBy', 'name email avatar')
     .populate('completedBy', 'name email avatar');
@@ -47,6 +55,7 @@ export async function createTask(data: {
   tags?: string[];
   order?: number;
   createdBy: string;
+  organizationId?: string;
 }): Promise<ITask> {
   const task = await Task.create(data);
 
@@ -61,6 +70,7 @@ export async function createTask(data: {
           body: `You've been assigned: "${data.title}"`,
           link: `/projects/${data.projectId}?tab=tasks`,
           metadata: { taskId: task._id.toString(), projectId: data.projectId },
+          organizationId: data.organizationId,
         });
       }
     }
@@ -69,26 +79,34 @@ export async function createTask(data: {
       taskId: task._id.toString(),
       projectId: data.projectId,
       assignees: data.assignees,
+      organizationId: data.organizationId,
     });
   }
 
   return task;
 }
 
-export async function updateTask(id: string, data: Partial<ITask>, actingUserId?: string): Promise<ITask> {
-  const isDone = data.status === 'DONE';
-  const wasNotDone = (await Task.findById(id).select('status').lean())?.status !== 'DONE';
+export async function updateTask(
+  id: string,
+  data: Partial<ITask>,
+  actingUserId?: string,
+  organizationId?: string
+): Promise<ITask> {
+  const filter: Record<string, unknown> = { _id: id };
+  if (organizationId) filter.organizationId = organizationId;
 
-  const task = await Task.findByIdAndUpdate(
-    id,
+  const isDone = data.status === 'DONE';
+  const current = await Task.findOne(filter).select('status').lean();
+  const wasNotDone = current?.status !== 'DONE';
+
+  const task = await Task.findOneAndUpdate(
+    filter,
     {
       $set: {
         ...data,
-        // Record completion timestamp and who completed it
         ...(isDone && wasNotDone
           ? { completedAt: new Date(), completedBy: actingUserId ?? null }
           : {}),
-        // Clear completion info if moved back out of DONE
         ...(!isDone && data.status
           ? { completedAt: null, completedBy: null }
           : {}),
@@ -104,16 +122,25 @@ export async function updateTask(id: string, data: Partial<ITask>, actingUserId?
   return task;
 }
 
-export async function deleteTask(id: string): Promise<void> {
-  const task = await Task.findByIdAndDelete(id);
+export async function deleteTask(id: string, organizationId?: string): Promise<void> {
+  const filter: Record<string, unknown> = { _id: id };
+  if (organizationId) filter.organizationId = organizationId;
+
+  const task = await Task.findOneAndDelete(filter);
   if (!task) throw new NotFoundError('Task');
 }
 
-export async function reorderTasks(tasks: Array<{ id: string; order: number; status: string }>): Promise<void> {
+export async function reorderTasks(
+  tasks: Array<{ id: string; order: number; status: string }>,
+  organizationId?: string
+): Promise<void> {
   const mongoose = await import('mongoose');
   const ops = tasks.map(t => ({
     updateOne: {
-      filter: { _id: new mongoose.Types.ObjectId(t.id) },
+      filter: {
+        _id: new mongoose.Types.ObjectId(t.id),
+        ...(organizationId ? { organizationId } : {}),
+      },
       update: { $set: { order: t.order, status: t.status } },
     },
   }));

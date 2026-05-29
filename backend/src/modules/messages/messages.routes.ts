@@ -2,11 +2,12 @@ import { Router } from 'express';
 import { z } from 'zod';
 import { authenticate, AuthRequest } from '../../middleware/authenticate';
 import { authorize } from '../../middleware/authorize';
+import { tenantScope } from '../../middleware/tenantScope';
 import { validateBody } from '../../middleware/validate';
 import * as service from './messages.service';
 
 const router = Router();
-router.use(authenticate);
+router.use(authenticate, tenantScope);
 
 const sendMessageSchema = z.object({
   projectId: z.string().min(1),
@@ -22,14 +23,21 @@ const sendMessageSchema = z.object({
 
 router.get('/', authorize('messages:read'), async (req: AuthRequest, res, next) => {
   try {
-    const messages = await service.getMessages(req.query as Record<string, string>);
+    const messages = await service.getMessages({
+      ...(req.query as Record<string, string>),
+      organizationId: req.user!.organizationId,
+    });
     res.json({ success: true, data: messages });
   } catch (e) { next(e); }
 });
 
 router.post('/', authorize('messages:write'), validateBody(sendMessageSchema), async (req: AuthRequest, res, next) => {
   try {
-    const message = await service.sendMessage({ ...req.body, senderId: req.user!.id });
+    const message = await service.sendMessage({
+      ...req.body,
+      senderId: req.user!.id,
+      organizationId: req.user!.organizationId,
+    });
     res.status(201).json({ success: true, data: message });
   } catch (e) { next(e); }
 });
@@ -38,7 +46,12 @@ router.post('/', authorize('messages:write'), validateBody(sendMessageSchema), a
 router.get('/search', authorize('messages:read'), async (req: AuthRequest, res, next) => {
   try {
     const { q, projectId, limit } = req.query as Record<string, string>;
-    const results = await service.searchMessages(q, projectId, limit ? Number(limit) : 20);
+    const results = await service.searchMessages(
+      q,
+      projectId,
+      limit ? Number(limit) : 20,
+      req.user!.organizationId
+    );
     res.json({ success: true, data: results });
   } catch (e) { next(e); }
 });
@@ -46,12 +59,15 @@ router.get('/search', authorize('messages:read'), async (req: AuthRequest, res, 
 // /channels must be before /:id
 router.get('/channels', authorize('messages:read'), async (req: AuthRequest, res, next) => {
   try {
-    const channels = await service.listChannels(req.query.projectId as string | undefined);
+    const channels = await service.listChannels(
+      req.query.projectId as string | undefined,
+      req.user!.organizationId
+    );
     res.json({ success: true, data: { channels } });
   } catch (e) { next(e); }
 });
 
-// Create a new channel for a project (ADMIN / SUPERADMIN / PROJECT_MANAGER)
+// Create a new channel for a project
 router.post('/channels', authorize('messages:write'), validateBody(z.object({
   projectId: z.string().min(1),
   name: z.string().min(1).max(80).regex(/^[a-z0-9-]+$/, 'Channel name must be lowercase letters, numbers, and hyphens only'),
@@ -61,8 +77,11 @@ router.post('/channels', authorize('messages:write'), validateBody(z.object({
     const { Channel } = await import('../../models/Channel');
     const { projectId, name, type } = req.body;
 
-    // Check for duplicate channel name in this project
-    const existing = await Channel.findOne({ projectId, name });
+    const existing = await Channel.findOne({
+      projectId,
+      name,
+      ...(req.user!.organizationId ? { organizationId: req.user!.organizationId } : {}),
+    });
     if (existing) {
       res.status(409).json({ success: false, error: { message: `A channel named #${name} already exists in this project` } });
       return;
@@ -74,6 +93,7 @@ router.post('/channels', authorize('messages:write'), validateBody(z.object({
       type: type || 'PROJECT',
       members: [req.user!.id],
       createdBy: req.user!.id,
+      ...(req.user!.organizationId ? { organizationId: req.user!.organizationId } : {}),
     });
 
     const populated = await channel.populate('projectId', 'name');
@@ -88,6 +108,7 @@ router.get('/channels/:channelId/messages', authorize('messages:read'), async (r
       channelId: req.params.channelId,
       before,
       limit: limit ? Number(limit) : 50,
+      organizationId: req.user!.organizationId,
     });
     res.json({ success: true, data: { messages } });
   } catch (e) { next(e); }
@@ -101,7 +122,11 @@ router.post('/channels/:channelId/messages', authorize('messages:write'), valida
   replyTo: z.string().optional(),
 })), async (req: AuthRequest, res, next) => {
   try {
-    const channel = await (await import('../../models/Channel')).Channel.findById(req.params.channelId);
+    const { Channel } = await import('../../models/Channel');
+    const channelFilter: Record<string, unknown> = { _id: req.params.channelId };
+    if (req.user!.organizationId) channelFilter.organizationId = req.user!.organizationId;
+
+    const channel = await Channel.findOne(channelFilter);
     if (!channel) {
       res.status(404).json({ success: false, error: { message: 'Channel not found' } });
       return;
@@ -115,6 +140,7 @@ router.post('/channels/:channelId/messages', authorize('messages:write'), valida
       attachments: req.body.attachments,
       mentions: req.body.mentions,
       replyTo: req.body.replyTo,
+      organizationId: req.user!.organizationId,
     });
     res.status(201).json({ success: true, data: message });
   } catch (e) { next(e); }
@@ -131,7 +157,12 @@ router.patch('/:id', authorize('messages:write'), async (req: AuthRequest, res, 
 
 router.delete('/:id', authorize('messages:write'), async (req: AuthRequest, res, next) => {
   try {
-    await service.deleteMessage(req.params.id, req.user!.id, req.user!.role);
+    await service.deleteMessage(
+      req.params.id,
+      req.user!.id,
+      req.user!.orgRole || req.user!.role,
+      req.user!.organizationId
+    );
     res.json({ success: true });
   } catch (e) { next(e); }
 });

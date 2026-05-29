@@ -1,9 +1,10 @@
 import { Router } from 'express';
 import { authenticate, AuthRequest } from '../../middleware/authenticate';
+import { tenantScope } from '../../middleware/tenantScope';
 import * as service from './notifications.service';
 
 const router = Router();
-router.use(authenticate);
+router.use(authenticate, tenantScope);
 
 router.get('/', async (req: AuthRequest, res, next) => {
   try {
@@ -12,6 +13,7 @@ router.get('/', async (req: AuthRequest, res, next) => {
       limit: limit ? Number(limit) : 20,
       unread: unread === 'true',
       page: page ? Number(page) : 1,
+      organizationId: req.user!.organizationId,
     });
     res.json({ success: true, data: result });
   } catch (e) { next(e); }
@@ -20,7 +22,7 @@ router.get('/', async (req: AuthRequest, res, next) => {
 // Static routes MUST come before /:id to avoid param collision
 router.post('/read-all', async (req: AuthRequest, res, next) => {
   try {
-    await service.markAllRead(req.user!.id);
+    await service.markAllRead(req.user!.id, req.user!.organizationId);
     res.json({ success: true });
   } catch (e) { next(e); }
 });
@@ -42,7 +44,7 @@ router.patch('/preferences', async (req: AuthRequest, res, next) => {
 // Parameterised routes
 router.post('/:id/read', async (req: AuthRequest, res, next) => {
   try {
-    await service.markRead(req.params.id, req.user!.id);
+    await service.markRead(req.params.id, req.user!.id, req.user!.organizationId);
     res.json({ success: true });
   } catch (e) { next(e); }
 });

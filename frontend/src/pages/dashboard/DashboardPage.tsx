@@ -56,8 +56,8 @@ function KPICard({ title, value, icon: Icon, trend, color, href }: KPICardProps)
 
 export function DashboardPage() {
   const { user } = useAuthStore();
-  const isAdmin = user && ['ADMIN', 'SUPERADMIN'].includes(user.role);
-  const canCreateProject = user && ['ADMIN', 'SUPERADMIN', 'PROJECT_MANAGER'].includes(user.role);
+  const isAdmin = user && ['ADMIN', 'SUPERADMIN', 'ORGANIZATION_OWNER', 'ORGANIZATION_ADMIN'].includes(user.orgRole || user.role);
+  const canCreateProject = user && ['ADMIN', 'SUPERADMIN', 'PROJECT_MANAGER', 'ORGANIZATION_OWNER', 'ORGANIZATION_ADMIN'].includes(user.orgRole || user.role);
 
   const { data: analytics, isLoading: analyticsLoading } = useQuery({
     queryKey: ['analytics', 'agency'],

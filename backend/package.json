@@ -12,7 +12,11 @@
     "test:unit": "jest --config jest.config.ts --runInBand --testPathPattern=unit",
     "test:integration": "jest --config jest.config.ts --runInBand --testPathPattern=integration",
     "test:system": "jest --config jest.config.ts --runInBand --testPathPattern=system",
-    "test:coverage": "jest --config jest.config.ts --runInBand --coverage"
+    "test:coverage": "jest --config jest.config.ts --runInBand --coverage",
+    "migrate:001": "ts-node src/migrations/001_add_organizationId_indexes.ts",
+    "migrate:002": "ts-node src/migrations/002_backfill_organizationId.ts",
+    "migrate:003": "ts-node src/migrations/003_migrate_storage_keys.ts",
+    "migrate:all": "npm run migrate:001 && npm run migrate:002 && npm run migrate:003"
   },
   "dependencies": {
     "@aws-sdk/client-s3": "3.490.0",

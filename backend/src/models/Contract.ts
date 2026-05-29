@@ -14,6 +14,7 @@ export interface ISignature {
 
 export interface IContract extends Document {
   _id: mongoose.Types.ObjectId;
+  organizationId: mongoose.Types.ObjectId;
   clientId: mongoose.Types.ObjectId;
   projectId?: mongoose.Types.ObjectId;
   templateId?: mongoose.Types.ObjectId;
@@ -43,6 +44,12 @@ const SignatureSchema = new Schema<ISignature>({
 }, { _id: false });
 
 const ContractSchema = new Schema<IContract>({
+  organizationId: {
+    type: Schema.Types.ObjectId,
+    ref: 'Organization',
+    required: true,
+    index: true,
+  },
   clientId: { type: Schema.Types.ObjectId, ref: 'Client', required: true, index: true },
   projectId: { type: Schema.Types.ObjectId, ref: 'Project' },
   templateId: { type: Schema.Types.ObjectId, ref: 'ContractTemplate' },
@@ -72,6 +79,8 @@ const ContractSchema = new Schema<IContract>({
   toObject: { virtuals: true },
 });
 
+ContractSchema.index({ organizationId: 1, status: 1 });
+ContractSchema.index({ organizationId: 1, clientId: 1 });
 ContractSchema.index({ clientId: 1, status: 1 });
 ContractSchema.index({ projectId: 1 });
 

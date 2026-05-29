@@ -26,19 +26,33 @@ jest.mock('../../lib/passport', () => ({ initPassport: jest.fn() }));
 
 import app from '../../app';
 import { User } from '../../models/User';
+import { getOrCreateTestOrg, resetTestOrgCache } from '../setup/testFixtures';
 
 const API = '/api/v1';
 
 async function getToken(email: string, password: string, role: string): Promise<string> {
+  const orgId = await getOrCreateTestOrg();
   const argon2 = await import('argon2');
   const passwordHash = await argon2.hash(password, { type: argon2.argon2id });
-  await User.create({ email, name: 'Test', role, passwordHash });
+  // Map legacy roles to new orgRoles
+  const orgRoleMap: Record<string, string> = {
+    SUPERADMIN: 'ORGANIZATION_OWNER',
+    ADMIN: 'ORGANIZATION_ADMIN',
+    PROJECT_MANAGER: 'PROJECT_MANAGER',
+    CONTRIBUTOR: 'CONTRIBUTOR',
+    CLIENT: 'CLIENT',
+  };
+  const orgRole = orgRoleMap[role] || 'CLIENT';
+  // Remove any existing user with this email to avoid conflicts
+  await User.deleteOne({ email });
+  await User.create({ email, name: 'Test', role, orgRole, organizationId: orgId, passwordHash });
   const res = await request(app).post(`${API}/auth/login`).send({ email, password });
-  return res.body.data.accessToken;
+  return res.body.data?.accessToken;
 }
 
 beforeAll(async () => { await connectTestDb(); });
-afterEach(async () => { await clearTestDb(); });
+beforeEach(async () => { /* org created lazily in getToken */ });
+afterEach(async () => { await clearTestDb(); resetTestOrgCache(); });
 afterAll(async () => { await disconnectTestDb(); });
 
 // ── GET /admin/team ───────────────────────────────────────────────────────────
@@ -122,9 +136,10 @@ describe('PATCH /admin/team/:id/role', () => {
     const adminToken = await getToken('admin@test.com', 'Admin1234!', 'ADMIN');
 
     // Create a contributor
+    const orgId = await getOrCreateTestOrg();
     const argon2 = await import('argon2');
     const ph = await argon2.hash('Contrib1!', { type: argon2.argon2id });
-    const contrib = await User.create({ email: 'contrib@test.com', name: 'C', role: 'CONTRIBUTOR', passwordHash: ph });
+    const contrib = await User.create({ email: 'contrib@test.com', name: 'C', role: 'CONTRIBUTOR', orgRole: 'CONTRIBUTOR', organizationId: orgId, passwordHash: ph });
 
     const res = await request(app)
       .patch(`${API}/admin/team/${contrib._id}/role`)
@@ -140,9 +155,10 @@ describe('PATCH /admin/team/:id/role', () => {
 describe('PATCH /admin/team/:id/deactivate', () => {
   it('200 — deactivates a user', async () => {
     const adminToken = await getToken('admin@test.com', 'Admin1234!', 'ADMIN');
+    const orgId = await getOrCreateTestOrg();
     const argon2 = await import('argon2');
     const ph = await argon2.hash('Pass1234!', { type: argon2.argon2id });
-    const user = await User.create({ email: 'target@test.com', name: 'T', role: 'CONTRIBUTOR', passwordHash: ph });
+    const user = await User.create({ email: 'target@test.com', name: 'T', role: 'CONTRIBUTOR', orgRole: 'CONTRIBUTOR', organizationId: orgId, passwordHash: ph });
 
     const res = await request(app)
       .patch(`${API}/admin/team/${user._id}/deactivate`)

@@ -48,7 +48,7 @@ export function InvoicesPage() {
     onError: () => toast.error('Failed to generate payment link'),
   });
 
-  const canCreate = user && ['ADMIN', 'SUPERADMIN', 'PROJECT_MANAGER'].includes(user.role);
+  const canCreate = user && ['ADMIN', 'SUPERADMIN', 'PROJECT_MANAGER', 'ORGANIZATION_OWNER', 'ORGANIZATION_ADMIN'].includes(user.orgRole || user.role);
   const statuses = ['DRAFT', 'SENT', 'VIEWED', 'PARTIAL', 'PAID', 'OVERDUE', 'VOID'];
   const invoices = data?.invoices || [];
 

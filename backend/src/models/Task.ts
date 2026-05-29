@@ -5,6 +5,7 @@ export type TaskPriority = 'LOW' | 'MEDIUM' | 'HIGH' | 'URGENT';
 
 export interface ITask extends Document {
   _id: mongoose.Types.ObjectId;
+  organizationId: mongoose.Types.ObjectId;
   projectId: mongoose.Types.ObjectId;
   milestoneId?: mongoose.Types.ObjectId;
   title: string;
@@ -24,6 +25,12 @@ export interface ITask extends Document {
 }
 
 const TaskSchema = new Schema<ITask>({
+  organizationId: {
+    type: Schema.Types.ObjectId,
+    ref: 'Organization',
+    required: true,
+    index: true,
+  },
   projectId: { type: Schema.Types.ObjectId, ref: 'Project', required: true, index: true },
   milestoneId: { type: Schema.Types.ObjectId },
   title: { type: String, required: true, trim: true },
@@ -52,6 +59,8 @@ const TaskSchema = new Schema<ITask>({
   toObject: { virtuals: true },
 });
 
+TaskSchema.index({ organizationId: 1, projectId: 1, status: 1 });
+TaskSchema.index({ organizationId: 1, projectId: 1, assignees: 1 });
 TaskSchema.index({ projectId: 1, status: 1 });
 TaskSchema.index({ assignees: 1 });
 

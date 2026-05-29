@@ -2,9 +2,10 @@ import { AutomationRule, IAutomationRule, TriggerEvent } from '../../models/Auto
 import { NotFoundError } from '../../lib/errors';
 import { logger } from '../../lib/logger';
 
-export async function listRules(query: { page?: number; limit?: number; isActive?: boolean }) {
-  const { page = 1, limit = 20, isActive } = query;
+export async function listRules(query: { page?: number; limit?: number; isActive?: boolean; organizationId?: string }) {
+  const { page = 1, limit = 20, isActive, organizationId } = query;
   const filter: Record<string, unknown> = {};
+  if (organizationId) filter.organizationId = organizationId;
   if (isActive !== undefined) filter.isActive = isActive;
 
   const [rules, total] = await Promise.all([
@@ -20,8 +21,10 @@ export async function listRules(query: { page?: number; limit?: number; isActive
   return { rules, total, page, limit };
 }
 
-export async function getRule(id: string): Promise<IAutomationRule> {
-  const rule = await AutomationRule.findById(id);
+export async function getRule(id: string, organizationId?: string): Promise<IAutomationRule> {
+  const filter: Record<string, unknown> = { _id: id };
+  if (organizationId) filter.organizationId = organizationId;
+  const rule = await AutomationRule.findOne(filter);
   if (!rule) throw new NotFoundError('Automation rule');
   return rule;
 }
@@ -32,27 +35,36 @@ export async function createRule(data: {
   trigger: { event: TriggerEvent; conditions: Array<{ field: string; operator: string; value: unknown }> };
   actions: Array<{ type: string; params: Record<string, unknown> }>;
   createdBy: string;
+  organizationId?: string;
 }): Promise<IAutomationRule> {
   return AutomationRule.create({ ...data, isActive: true });
 }
 
-export async function updateRule(id: string, data: Partial<IAutomationRule>): Promise<IAutomationRule> {
-  const rule = await AutomationRule.findByIdAndUpdate(id, { $set: data }, { new: true });
+export async function updateRule(id: string, data: Partial<IAutomationRule>, organizationId?: string): Promise<IAutomationRule> {
+  const filter: Record<string, unknown> = { _id: id };
+  if (organizationId) filter.organizationId = organizationId;
+  const rule = await AutomationRule.findOneAndUpdate(filter, { $set: data }, { new: true });
   if (!rule) throw new NotFoundError('Automation rule');
   return rule;
 }
 
-export async function deleteRule(id: string): Promise<void> {
-  const rule = await AutomationRule.findByIdAndDelete(id);
+export async function deleteRule(id: string, organizationId?: string): Promise<void> {
+  const filter: Record<string, unknown> = { _id: id };
+  if (organizationId) filter.organizationId = organizationId;
+  const rule = await AutomationRule.findOneAndDelete(filter);
   if (!rule) throw new NotFoundError('Automation rule');
 }
 
 export async function emitAutomationEvent(event: TriggerEvent, context: Record<string, unknown>): Promise<void> {
   try {
-    const rules = await AutomationRule.find({
+    // Scope automation rules to the organization if context provides it
+    const filter: Record<string, unknown> = {
       isActive: true,
       'trigger.event': event,
-    });
+    };
+    if (context.organizationId) filter.organizationId = context.organizationId;
+
+    const rules = await AutomationRule.find(filter);
 
     for (const rule of rules) {
       try {
@@ -160,6 +172,7 @@ async function executeActions(
             const { Task } = await import('../../models/Task');
             await Task.create({
               projectId: action.params.projectId,
+              organizationId: action.params.organizationId || context.organizationId,
               title: String(action.params.title || 'Automated task'),
               description: action.params.description ? String(action.params.description) : undefined,
               priority: action.params.priority || 'MEDIUM',
@@ -167,6 +180,49 @@ async function executeActions(
               createdBy: action.params.createdBy || context.userId,
             });
           }
+          break;
+        }
+
+        case 'CHANGE_STATUS': {
+          // Changes the status of a project or task
+          // params: { resourceType: 'project'|'task', resourceId, newStatus }
+          const resourceType = String(action.params.resourceType || '');
+          const resourceId   = String(action.params.resourceId || context.projectId || context.taskId || '');
+          const newStatus    = String(action.params.newStatus || '');
+          const orgId        = String(action.params.organizationId || context.organizationId || '');
+
+          if (!resourceId || !newStatus) {
+            logger.warn({ action }, 'CHANGE_STATUS missing resourceId or newStatus');
+            break;
+          }
+
+          if (resourceType === 'project' || context.projectId) {
+            const { Project } = await import('../../models/Project');
+            const filter: Record<string, unknown> = { _id: resourceId };
+            if (orgId) filter.organizationId = orgId;
+            await Project.findOneAndUpdate(filter, { status: newStatus });
+            logger.info({ resourceId, newStatus, orgId }, 'Automation: project status changed');
+          } else if (resourceType === 'task' || context.taskId) {
+            const { Task } = await import('../../models/Task');
+            const filter: Record<string, unknown> = { _id: resourceId };
+            if (orgId) filter.organizationId = orgId;
+            await Task.findOneAndUpdate(filter, { status: newStatus });
+            logger.info({ resourceId, newStatus, orgId }, 'Automation: task status changed');
+          }
+          break;
+        }
+
+        case 'SEND_INVOICE': {
+          // Sends a DRAFT invoice
+          // params: { invoiceId } OR uses context.invoiceId
+          const invoiceId = String(action.params.invoiceId || context.invoiceId || '');
+          if (!invoiceId) {
+            logger.warn({ action }, 'SEND_INVOICE missing invoiceId');
+            break;
+          }
+          const { sendInvoice } = await import('../invoices/invoices.service');
+          await sendInvoice(invoiceId);
+          logger.info({ invoiceId }, 'Automation: invoice sent');
           break;
         }
 

@@ -5,7 +5,9 @@ export interface AuthUser {
   id: string;
   email: string;
   name: string;
-  role: string;
+  role: string;       // legacy — kept for backward compat
+  orgRole?: string;   // new multi-tenant role
+  organizationId?: string;
   clientId?: string;
   avatar?: string;
 }

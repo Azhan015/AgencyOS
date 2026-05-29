@@ -2,6 +2,7 @@ import { Router } from 'express';
 import { z } from 'zod';
 import { authenticate, AuthRequest } from '../../middleware/authenticate';
 import { authorize } from '../../middleware/authorize';
+import { tenantScope } from '../../middleware/tenantScope';
 import { validateBody } from '../../middleware/validate';
 import * as service from './invoices.service';
 import { constructWebhookEvent } from '../../lib/stripe';
@@ -38,7 +39,7 @@ router.post('/webhooks/stripe', async (req, res, next) => {
   }
 });
 
-router.use(authenticate);
+router.use(authenticate, tenantScope);
 
 router.get('/', authorize('invoices:read'), async (req: AuthRequest, res, next) => {
   try {
@@ -47,6 +48,7 @@ router.get('/', authorize('invoices:read'), async (req: AuthRequest, res, next) 
       clientId: req.user!.role === 'CLIENT' ? req.user!.clientId : (req.query.clientId as string),
       userRole: req.user!.role,
       userId: req.user!.id,
+      organizationId: req.user!.organizationId,
     });
     res.json({ success: true, data: result });
   } catch (e) { next(e); }
@@ -54,21 +56,25 @@ router.get('/', authorize('invoices:read'), async (req: AuthRequest, res, next) 
 
 router.post('/', authorize('invoices:write'), validateBody(createInvoiceSchema), async (req: AuthRequest, res, next) => {
   try {
-    const invoice = await service.createInvoice({ ...req.body, createdBy: req.user!.id });
+    const invoice = await service.createInvoice({
+      ...req.body,
+      createdBy: req.user!.id,
+      organizationId: req.user!.organizationId,
+    });
     res.status(201).json({ success: true, data: invoice });
   } catch (e) { next(e); }
 });
 
 router.get('/:id', authorize('invoices:read'), async (req: AuthRequest, res, next) => {
   try {
-    const invoice = await service.getInvoice(req.params.id);
+    const invoice = await service.getInvoice(req.params.id, req.user!.organizationId);
     res.json({ success: true, data: invoice });
   } catch (e) { next(e); }
 });
 
 router.patch('/:id', authorize('invoices:write'), async (req: AuthRequest, res, next) => {
   try {
-    const invoice = await service.updateInvoice(req.params.id, req.body);
+    const invoice = await service.updateInvoice(req.params.id, req.body, req.user!.organizationId);
     res.json({ success: true, data: invoice });
   } catch (e) { next(e); }
 });

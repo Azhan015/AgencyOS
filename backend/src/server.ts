@@ -4,6 +4,7 @@ import { connectDB } from './config/db';
 import { connectRedis } from './config/redis';
 import { initSocketServer } from './sockets/socketServer';
 import { startScheduledJobs } from './workers/scheduledJobs';
+import { startTrialLifecycleJobs } from './workers/trialLifecycleJobs';
 import { env } from './config/env';
 import { logger } from './lib/logger';
 
@@ -23,6 +24,7 @@ async function bootstrap(): Promise<void> {
 
     // Start scheduled jobs
     startScheduledJobs();
+    startTrialLifecycleJobs();
 
     // Start server
     httpServer.listen(PORT, () => {

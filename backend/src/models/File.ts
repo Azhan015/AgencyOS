@@ -15,6 +15,7 @@ export interface IAnnotation {
 
 export interface IFile extends Document {
   _id: mongoose.Types.ObjectId;
+  organizationId: mongoose.Types.ObjectId;
   projectId: mongoose.Types.ObjectId;
   clientId: mongoose.Types.ObjectId;
   uploadedBy: mongoose.Types.ObjectId;
@@ -46,6 +47,12 @@ const AnnotationSchema = new Schema<IAnnotation>({
 });
 
 const FileSchema = new Schema<IFile>({
+  organizationId: {
+    type: Schema.Types.ObjectId,
+    ref: 'Organization',
+    required: true,
+    index: true,
+  },
   projectId: { type: Schema.Types.ObjectId, ref: 'Project', required: true, index: true },
   clientId: { type: Schema.Types.ObjectId, ref: 'Client', required: true, index: true },
   uploadedBy: { type: Schema.Types.ObjectId, ref: 'User', required: true },
@@ -72,6 +79,9 @@ const FileSchema = new Schema<IFile>({
   toObject: { virtuals: true },
 });
 
+FileSchema.index({ organizationId: 1, projectId: 1, folder: 1 });
+FileSchema.index({ organizationId: 1, clientId: 1 });
+FileSchema.index({ organizationId: 1, scanStatus: 1 });
 FileSchema.index({ projectId: 1, folder: 1 });
 FileSchema.index({ clientId: 1 });
 FileSchema.index({ parentFileId: 1 });

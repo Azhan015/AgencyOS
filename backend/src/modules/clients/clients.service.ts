@@ -1,15 +1,13 @@
 import { Client, IClient } from '../../models/Client';
 import { User } from '../../models/User';
-import { generateSlug } from '../../lib/crypto';
+import { generateSlug, generateSecureToken, hashSHA256 } from '../../lib/crypto';
 import { sendEmail, getInvitationEmail } from '../../lib/email';
 import { cacheGet, cacheSet, cacheDel } from '../../config/redis';
 import { NotFoundError, ConflictError, ValidationError } from '../../lib/errors';
 import { env } from '../../config/env';
-import { generateSecureToken, hashSHA256 } from '../../lib/crypto';
 import { signAccessToken, signRefreshToken } from '../../lib/jwt';
 import { logger } from '../../lib/logger';
 import { v4 as uuidv4 } from 'uuid';
-import mongoose from 'mongoose';
 
 const INVITE_TOKEN_PREFIX = 'invite:';
 
@@ -19,10 +17,12 @@ export async function listClients(query: {
   status?: string;
   search?: string;
   pmId?: string;
+  organizationId?: string;
 }) {
-  const { page = 1, limit = 20, status, search, pmId } = query;
+  const { page = 1, limit = 20, status, search, pmId, organizationId } = query;
   const filter: Record<string, unknown> = {};
 
+  if (organizationId) filter.organizationId = organizationId;
   if (status) filter.status = status;
   if (pmId) filter.assignedPM = pmId;
   if (search) {
@@ -46,12 +46,21 @@ export async function listClients(query: {
   return { clients, total, page, limit, pages: Math.ceil(total / limit) };
 }
 
-export async function getClient(id: string): Promise<IClient> {
+export async function getClient(id: string, organizationId?: string): Promise<IClient> {
   const cacheKey = `client:${id}`;
   const cached = await cacheGet<IClient>(cacheKey);
-  if (cached) return cached;
+  if (cached) {
+    // Validate cached client belongs to the requesting org
+    if (organizationId && (cached as unknown as { organizationId?: { toString(): string } }).organizationId?.toString() !== organizationId) {
+      throw new NotFoundError('Client');
+    }
+    return cached;
+  }
 
-  const client = await Client.findById(id).populate('assignedPM', 'name email avatar');
+  const filter: Record<string, unknown> = { _id: id };
+  if (organizationId) filter.organizationId = organizationId;
+
+  const client = await Client.findOne(filter).populate('assignedPM', 'name email avatar');
   if (!client) throw new NotFoundError('Client');
 
   await cacheSet(cacheKey, client.toObject(), 300);
@@ -66,10 +75,15 @@ export async function createClient(data: {
   website?: string;
   tier?: string;
   assignedPM?: string;
+  organizationId?: string;
   metadata?: Record<string, unknown>;
 }): Promise<IClient> {
-  const existing = await Client.findOne({ email: data.email.toLowerCase() });
-  if (existing) throw new ConflictError('Client with this email already exists');
+  // Email uniqueness is scoped per organization — same email can exist in different orgs
+  const emailFilter: Record<string, unknown> = { email: data.email.toLowerCase() };
+  if (data.organizationId) emailFilter.organizationId = data.organizationId;
+
+  const existing = await Client.findOne(emailFilter);
+  if (existing) throw new ConflictError('Client with this email already exists in your organization');
 
   const slug = generateSlug(data.companyName);
 
@@ -82,9 +96,12 @@ export async function createClient(data: {
   return client;
 }
 
-export async function updateClient(id: string, data: Partial<IClient>): Promise<IClient> {
-  const client = await Client.findByIdAndUpdate(
-    id,
+export async function updateClient(id: string, data: Partial<IClient>, organizationId?: string): Promise<IClient> {
+  const filter: Record<string, unknown> = { _id: id };
+  if (organizationId) filter.organizationId = organizationId;
+
+  const client = await Client.findOneAndUpdate(
+    filter,
     { $set: data },
     { new: true, runValidators: true }
   ).populate('assignedPM', 'name email avatar');
@@ -95,12 +112,15 @@ export async function updateClient(id: string, data: Partial<IClient>): Promise<
   return client;
 }
 
-export async function deleteClient(id: string): Promise<void> {
-  const client = await Client.findById(id);
+export async function deleteClient(id: string, organizationId?: string): Promise<void> {
+  const filter: Record<string, unknown> = { _id: id };
+  if (organizationId) filter.organizationId = organizationId;
+
+  const client = await Client.findOne(filter);
   if (!client) throw new NotFoundError('Client');
 
   // Soft delete by suspending
-  await Client.findByIdAndUpdate(id, { status: 'SUSPENDED' });
+  await Client.findOneAndUpdate(filter, { status: 'SUSPENDED' });
   await cacheDel(`client:${id}`);
 }
 
@@ -116,7 +136,8 @@ export async function inviteClient(clientId: string, resend = false, frontendUrl
       email: client.email,
       name: client.contactName,
       role: 'CLIENT',
-      clientId: client._id,
+      orgRole: 'CLIENT',
+      organizationId: client.organizationId,
     });
   }
 
@@ -191,6 +212,8 @@ export async function acceptInvite(token: string, password?: string): Promise<{ 
   const accessToken = signAccessToken({
     sub: user._id.toString(),
     role: user.role,
+    orgRole: user.orgRole || user.role,
+    organizationId: user.organizationId?.toString() || '',
     clientId: user.clientId?.toString(),
     sessionId,
   });
@@ -199,6 +222,7 @@ export async function acceptInvite(token: string, password?: string): Promise<{ 
     sub: user._id.toString(),
     sessionId,
     family: tokenFamily,
+    organizationId: user.organizationId?.toString() || '',
   });
 
   // Store refresh token hash in Redis
@@ -211,13 +235,21 @@ export async function acceptInvite(token: string, password?: string): Promise<{ 
   return { userId, clientId, accessToken, refreshToken, user: user.toSafeObject() };
 }
 
-export async function getClientAnalytics(clientId: string) {
+export async function getClientAnalytics(clientId: string, organizationId?: string) {
   const { Project } = await import('../../models/Project');
   const { Invoice } = await import('../../models/Invoice');
 
+  // Always scope to org when available — prevents cross-tenant data leakage
+  const projectFilter: Record<string, unknown> = { clientId };
+  const invoiceFilter: Record<string, unknown> = { clientId };
+  if (organizationId) {
+    projectFilter.organizationId = organizationId;
+    invoiceFilter.organizationId = organizationId;
+  }
+
   const [projects, invoices] = await Promise.all([
-    Project.find({ clientId }).lean(),
-    Invoice.find({ clientId }).lean(),
+    Project.find(projectFilter).lean(),
+    Invoice.find(invoiceFilter).lean(),
   ]);
 
   const totalRevenue = invoices

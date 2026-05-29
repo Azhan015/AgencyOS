@@ -17,6 +17,7 @@ export interface IMilestone {
 
 export interface IProject extends Document {
   _id: mongoose.Types.ObjectId;
+  organizationId: mongoose.Types.ObjectId;
   name: string;
   slug: string;
   clientId: mongoose.Types.ObjectId;
@@ -52,8 +53,15 @@ const MilestoneSchema = new Schema<IMilestone>({
 });
 
 const ProjectSchema = new Schema<IProject>({
+  organizationId: {
+    type: Schema.Types.ObjectId,
+    ref: 'Organization',
+    required: true,
+    index: true,
+  },
   name: { type: String, required: true, trim: true },
-  slug: { type: String, required: true, unique: true, index: true },
+  // slug is unique per organization (not globally)
+  slug: { type: String, required: true, index: true },
   clientId: { type: Schema.Types.ObjectId, ref: 'Client', required: true, index: true },
   type: {
     type: String,
@@ -82,6 +90,10 @@ const ProjectSchema = new Schema<IProject>({
   toObject: { virtuals: true },
 });
 
+ProjectSchema.index({ organizationId: 1, slug: 1 }, { unique: true });
+ProjectSchema.index({ organizationId: 1, status: 1, createdAt: -1 });
+ProjectSchema.index({ organizationId: 1, clientId: 1 });
+ProjectSchema.index({ organizationId: 1, pm: 1 });
 ProjectSchema.index({ clientId: 1, status: 1 });
 ProjectSchema.index({ pm: 1 });
 ProjectSchema.index({ contributors: 1 });

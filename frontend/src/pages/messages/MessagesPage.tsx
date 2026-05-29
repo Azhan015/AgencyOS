@@ -67,17 +67,19 @@ export function MessagesPage() {
     onError: () => toast.error('Failed to send message'),
   });
 
-  // Socket: join channel and listen for new messages
+  // Socket: join the project room for the selected channel and listen for new messages
   useEffect(() => {
     if (!socket || !selectedChannel) return;
-    socket.emit('join:channel', selectedChannel._id);
+    // Backend socket uses project rooms, not channel rooms
+    const projectId = selectedChannel.projectId?._id;
+    if (projectId) socket.emit('join:project', projectId);
     const handler = () => {
       queryClient.invalidateQueries({ queryKey: ['messages', selectedChannel._id] });
     };
     socket.on('message:new', handler);
     return () => {
       socket.off('message:new', handler);
-      socket.emit('leave:channel', selectedChannel._id);
+      if (projectId) socket.emit('leave:project', projectId);
     };
   }, [socket, selectedChannel, queryClient]);
 

@@ -1,6 +1,6 @@
 import { Invoice } from '../models/Invoice';
 import { generateInvoicePDF } from '../lib/pdf';
-import { uploadFile, generateStorageKey } from '../config/storage';
+import { uploadFile, generateStorageKey, generateOrgStorageKey } from '../config/storage';
 import { env } from '../config/env';
 import { logger } from '../lib/logger';
 import { isRedisAvailable } from '../config/redis';
@@ -49,7 +49,9 @@ function getInvoiceQueue(): import('bull').Queue | null {
         status: invoice.status,
       });
 
-      const pdfKey = generateStorageKey('invoices', `${invoice.invoiceNumber}.pdf`);
+      const pdfKey = invoice.organizationId
+        ? generateOrgStorageKey(invoice.organizationId.toString(), 'invoices', `${invoice.invoiceNumber}.pdf`)
+        : generateStorageKey('invoices', `${invoice.invoiceNumber}.pdf`);
       await uploadFile(pdfKey, pdfBuffer, 'application/pdf');
       await Invoice.findByIdAndUpdate(invoiceId, { pdfKey });
 

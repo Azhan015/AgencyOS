@@ -1,6 +1,6 @@
 import { Notification, INotification, NotificationType } from '../../models/Notification';
 import { User } from '../../models/User';
-import { getSocketServer } from '../../sockets/socketServer';
+import { emitToOrgUser } from '../../sockets/socketServer';
 import { logger } from '../../lib/logger';
 
 export async function createNotification(data: {
@@ -10,13 +10,26 @@ export async function createNotification(data: {
   body: string;
   link?: string;
   metadata?: Record<string, unknown>;
+  organizationId?: string;
 }): Promise<INotification> {
-  const notification = await Notification.create(data);
+  const notification = await Notification.create({
+    userId: data.userId,
+    type: data.type,
+    title: data.title,
+    body: data.body,
+    link: data.link,
+    metadata: data.metadata,
+    ...(data.organizationId ? { organizationId: data.organizationId } : {}),
+  });
 
-  // Emit via socket to user's personal room
+  // Emit via socket to org-scoped user room
   try {
-    const io = getSocketServer();
-    io.to(`user:${data.userId}`).emit('notification:new', notification);
+    emitToOrgUser(
+      data.organizationId ?? '',
+      data.userId,
+      'notification:new',
+      notification
+    );
   } catch (err) {
     logger.warn({ err }, 'Socket notification emit failed');
   }
@@ -28,9 +41,11 @@ export async function listNotifications(userId: string, query: {
   limit?: number;
   unread?: boolean;
   page?: number;
+  organizationId?: string;
 }) {
-  const { limit = 20, unread, page = 1 } = query;
+  const { limit = 20, unread, page = 1, organizationId } = query;
   const filter: Record<string, unknown> = { userId };
+  if (organizationId) filter.organizationId = organizationId;
   if (unread) filter.isRead = false;
 
   const [notifications, total, unreadCount] = await Promise.all([
@@ -40,24 +55,22 @@ export async function listNotifications(userId: string, query: {
       .limit(limit)
       .lean(),
     Notification.countDocuments(filter),
-    Notification.countDocuments({ userId, isRead: false }),
+    Notification.countDocuments({ userId, isRead: false, ...(organizationId ? { organizationId } : {}) }),
   ]);
 
   return { notifications, total, unreadCount, page, limit };
 }
 
-export async function markRead(notificationId: string, userId: string): Promise<void> {
-  await Notification.findOneAndUpdate(
-    { _id: notificationId, userId },
-    { isRead: true, readAt: new Date() }
-  );
+export async function markRead(notificationId: string, userId: string, organizationId?: string): Promise<void> {
+  const filter: Record<string, unknown> = { _id: notificationId, userId };
+  if (organizationId) filter.organizationId = organizationId;
+  await Notification.findOneAndUpdate(filter, { isRead: true, readAt: new Date() });
 }
 
-export async function markAllRead(userId: string): Promise<void> {
-  await Notification.updateMany(
-    { userId, isRead: false },
-    { isRead: true, readAt: new Date() }
-  );
+export async function markAllRead(userId: string, organizationId?: string): Promise<void> {
+  const filter: Record<string, unknown> = { userId, isRead: false };
+  if (organizationId) filter.organizationId = organizationId;
+  await Notification.updateMany(filter, { isRead: true, readAt: new Date() });
 }
 
 export async function updatePreferences(userId: string, prefs: {

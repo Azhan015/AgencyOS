@@ -1,12 +1,20 @@
 import { Message, IMessage } from '../../models/Message';
 import { Channel, IChannel } from '../../models/Channel';
 import { NotFoundError, AuthorizationError } from '../../lib/errors';
-import { getSocketServer } from '../../sockets/socketServer';
+import { emitToOrgProject } from '../../sockets/socketServer';
 import { createNotification } from '../notifications/notifications.service';
 import { logger } from '../../lib/logger';
 
-export async function getOrCreateProjectChannel(projectId: string, name = 'general', createdBy: string): Promise<IChannel> {
-  let channel = await Channel.findOne({ projectId, name });
+export async function getOrCreateProjectChannel(
+  projectId: string,
+  name = 'general',
+  createdBy: string,
+  organizationId?: string
+): Promise<IChannel> {
+  const filter: Record<string, unknown> = { projectId, name };
+  if (organizationId) filter.organizationId = organizationId;
+
+  let channel = await Channel.findOne(filter);
   if (!channel) {
     channel = await Channel.create({
       projectId,
@@ -14,13 +22,15 @@ export async function getOrCreateProjectChannel(projectId: string, name = 'gener
       type: 'PROJECT',
       members: [createdBy],
       createdBy,
+      ...(organizationId ? { organizationId } : {}),
     });
   }
   return channel;
 }
 
-export async function listChannels(projectId?: string) {
+export async function listChannels(projectId?: string, organizationId?: string) {
   const filter: Record<string, unknown> = { isArchived: false };
+  if (organizationId) filter.organizationId = organizationId;
   if (projectId) filter.projectId = projectId;
 
   return Channel.find(filter)
@@ -35,13 +45,14 @@ export async function getMessages(query: {
   channelId?: string;
   before?: string;
   limit?: number;
+  organizationId?: string;
 }) {
-  const { projectId, channelId, before, limit = 50 } = query;
+  const { projectId, channelId, before, limit = 50, organizationId } = query;
   const filter: Record<string, unknown> = { deletedAt: null };
 
+  if (organizationId) filter.organizationId = organizationId;
   if (channelId) filter.channelId = channelId;
   else if (projectId) filter.projectId = projectId;
-
   if (before) filter.createdAt = { $lt: new Date(before) };
 
   const messages = await Message.find(filter)
@@ -64,13 +75,20 @@ export async function sendMessage(data: {
   attachments?: string[];
   mentions?: string[];
   replyTo?: string;
+  organizationId?: string;
 }): Promise<IMessage> {
   const message = await Message.create({
-    ...data,
+    projectId: data.projectId,
+    channelId: data.channelId,
+    senderId: data.senderId,
+    content: data.content,
     contentType: data.contentType || 'TEXT',
+    attachments: data.attachments,
+    mentions: data.mentions,
+    replyTo: data.replyTo,
+    ...(data.organizationId ? { organizationId: data.organizationId } : {}),
   });
 
-  // Update channel last message time
   await Channel.findByIdAndUpdate(data.channelId, { lastMessageAt: new Date() });
 
   const populated = await Message.findById(message._id)
@@ -78,10 +96,9 @@ export async function sendMessage(data: {
     .populate('attachments', 'name mimeType sizeBytes')
     .populate('mentions', 'name email');
 
-  // Emit via socket
+  // Emit via org-namespaced project room
   try {
-    const io = getSocketServer();
-    io.to(`project:${data.projectId}`).emit('message:new', populated);
+    emitToOrgProject(data.organizationId ?? '', data.projectId, 'message:new', populated);
   } catch (err) {
     logger.warn({ err }, 'Socket emit failed');
   }
@@ -94,9 +111,10 @@ export async function sendMessage(data: {
           userId,
           type: 'MENTION',
           title: 'You were mentioned',
-          body: `Someone mentioned you in a message`,
+          body: 'Someone mentioned you in a message',
           link: `/projects/${data.projectId}?tab=messages`,
           metadata: { messageId: message._id.toString(), projectId: data.projectId },
+          organizationId: data.organizationId,
         });
       }
     }
@@ -105,13 +123,23 @@ export async function sendMessage(data: {
   return populated!;
 }
 
-export async function editMessage(id: string, content: string, userId: string): Promise<IMessage> {
-  const message = await Message.findById(id);
-  if (!message) throw new NotFoundError('Message');
-  if (message.senderId.toString() !== userId) throw new AuthorizationError('You can only edit your own messages');
+export async function editMessage(
+  id: string,
+  content: string,
+  userId: string,
+  organizationId?: string
+): Promise<IMessage> {
+  const filter: Record<string, unknown> = { _id: id };
+  if (organizationId) filter.organizationId = organizationId;
 
-  const updated = await Message.findByIdAndUpdate(
-    id,
+  const message = await Message.findOne(filter);
+  if (!message) throw new NotFoundError('Message');
+  if (message.senderId.toString() !== userId) {
+    throw new AuthorizationError('You can only edit your own messages');
+  }
+
+  const updated = await Message.findOneAndUpdate(
+    filter,
     { content, editedAt: new Date() },
     { new: true }
   ).populate('senderId', 'name email avatar');
@@ -119,8 +147,12 @@ export async function editMessage(id: string, content: string, userId: string): 
   if (!updated) throw new NotFoundError('Message');
 
   try {
-    const io = getSocketServer();
-    io.to(`project:${message.projectId.toString()}`).emit('message:edited', updated);
+    emitToOrgProject(
+      organizationId ?? '',
+      message.projectId.toString(),
+      'message:edited',
+      updated
+    );
   } catch (err) {
     logger.warn({ err }, 'Socket emit failed');
   }
@@ -128,20 +160,36 @@ export async function editMessage(id: string, content: string, userId: string): 
   return updated;
 }
 
-export async function deleteMessage(id: string, userId: string, userRole: string): Promise<void> {
-  const message = await Message.findById(id);
+export async function deleteMessage(
+  id: string,
+  userId: string,
+  userRole: string,
+  organizationId?: string
+): Promise<void> {
+  const filter: Record<string, unknown> = { _id: id };
+  if (organizationId) filter.organizationId = organizationId;
+
+  const message = await Message.findOne(filter);
   if (!message) throw new NotFoundError('Message');
 
-  const canDelete = message.senderId.toString() === userId ||
-    ['ADMIN', 'SUPERADMIN', 'PROJECT_MANAGER'].includes(userRole);
+  const canDelete =
+    message.senderId.toString() === userId ||
+    ['ADMIN', 'SUPERADMIN', 'PROJECT_MANAGER', 'ORGANIZATION_ADMIN', 'ORGANIZATION_OWNER'].includes(userRole);
 
   if (!canDelete) throw new AuthorizationError('Cannot delete this message');
 
-  await Message.findByIdAndUpdate(id, { deletedAt: new Date(), content: '[Message deleted]' });
+  await Message.findOneAndUpdate(filter, {
+    deletedAt: new Date(),
+    content: '[Message deleted]',
+  });
 
   try {
-    const io = getSocketServer();
-    io.to(`project:${message.projectId.toString()}`).emit('message:deleted', { id });
+    emitToOrgProject(
+      organizationId ?? '',
+      message.projectId.toString(),
+      'message:deleted',
+      { id }
+    );
   } catch (err) {
     logger.warn({ err }, 'Socket emit failed');
   }
@@ -153,27 +201,44 @@ export async function pinMessage(id: string, pin: boolean): Promise<IMessage> {
   return message;
 }
 
-export async function markRead(messageId: string, userId: string): Promise<void> {
+export async function markRead(
+  messageId: string,
+  userId: string,
+  organizationId?: string
+): Promise<void> {
   await Message.findByIdAndUpdate(messageId, {
     $addToSet: { readBy: { userId, readAt: new Date() } },
   });
 
-  const message = await Message.findById(messageId);
+  const filter: Record<string, unknown> = { _id: messageId };
+  if (organizationId) filter.organizationId = organizationId;
+
+  const message = await Message.findOne(filter);
   if (message) {
     try {
-      const io = getSocketServer();
-      io.to(`project:${message.projectId.toString()}`).emit('message:read', { messageId, userId });
+      emitToOrgProject(
+        organizationId ?? '',
+        message.projectId.toString(),
+        'message:read',
+        { messageId, userId }
+      );
     } catch (err) {
       logger.warn({ err }, 'Socket emit failed');
     }
   }
 }
 
-export async function searchMessages(query: string, projectId?: string, limit = 20) {
+export async function searchMessages(
+  query: string,
+  projectId?: string,
+  limit = 20,
+  organizationId?: string
+) {
   const filter: Record<string, unknown> = {
     $text: { $search: query },
     deletedAt: null,
   };
+  if (organizationId) filter.organizationId = organizationId;
   if (projectId) filter.projectId = projectId;
 
   return Message.find(filter, { score: { $meta: 'textScore' } })

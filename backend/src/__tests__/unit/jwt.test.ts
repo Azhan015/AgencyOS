@@ -14,6 +14,8 @@ describe('JWT utilities', () => {
   const accessPayload = {
     sub: 'user123',
     role: 'ADMIN',
+    orgRole: 'ORGANIZATION_ADMIN',
+    organizationId: 'org-abc-123',
     sessionId: 'sess-abc',
   };
 
@@ -21,6 +23,7 @@ describe('JWT utilities', () => {
     sub: 'user123',
     sessionId: 'sess-abc',
     family: 'family-xyz',
+    organizationId: 'org-abc-123',
   };
 
   // ── Access tokens ──────────────────────────────────────────────────────────

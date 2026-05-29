@@ -2,7 +2,7 @@ import { Approval, IApproval } from '../../models/Approval';
 import { Project } from '../../models/Project';
 import { NotFoundError, ValidationError } from '../../lib/errors';
 import { createNotification } from '../notifications/notifications.service';
-import { getSocketServer } from '../../sockets/socketServer';
+import { emitToOrgProject } from '../../sockets/socketServer';
 import { sendEmail, getApprovalRequestEmail } from '../../lib/email';
 import { env } from '../../config/env';
 import { logger } from '../../lib/logger';
@@ -12,9 +12,11 @@ export async function listApprovals(query: {
   status?: string;
   page?: number;
   limit?: number;
+  organizationId?: string;
 }) {
-  const { projectId, status, page = 1, limit = 20 } = query;
+  const { projectId, status, page = 1, limit = 20, organizationId } = query;
   const filter: Record<string, unknown> = {};
+  if (organizationId) filter.organizationId = organizationId;
   if (projectId) filter.projectId = projectId;
   if (status) filter.status = status;
 
@@ -33,8 +35,10 @@ export async function listApprovals(query: {
   return { approvals, total, page, limit };
 }
 
-export async function getApproval(id: string): Promise<IApproval> {
-  const approval = await Approval.findById(id)
+export async function getApproval(id: string, organizationId?: string): Promise<IApproval> {
+  const filter: Record<string, unknown> = { _id: id };
+  if (organizationId) filter.organizationId = organizationId;
+  const approval = await Approval.findOne(filter)
     .populate('submittedBy', 'name email avatar')
     .populate('approvedBy', 'name email')
     .populate('fileIds', 'name mimeType sizeBytes storageKey version annotations');
@@ -50,6 +54,7 @@ export async function createApproval(data: {
   submissionNote?: string;
   dueDate?: Date;
   title: string;
+  organizationId?: string;
 }): Promise<IApproval> {
   const approval = await Approval.create({
     ...data,
@@ -92,13 +97,14 @@ export async function createApproval(data: {
     }
   }
 
-  // Emit socket event
+  // Emit socket event — org-namespaced
   try {
-    const io = getSocketServer();
-    io.to(`project:${data.projectId}`).emit('approval:updated', {
-      approvalId: approval._id.toString(),
-      status: 'PENDING',
-    });
+    emitToOrgProject(
+      data.organizationId ?? '',
+      data.projectId,
+      'approval:updated',
+      { approvalId: approval._id.toString(), status: 'PENDING' }
+    );
   } catch (err) {
     logger.warn({ err }, 'Socket emit failed');
   }
@@ -136,11 +142,12 @@ export async function approveDeliverable(id: string, userId: string): Promise<IA
   }
 
   try {
-    const io = getSocketServer();
-    io.to(`project:${approval.projectId.toString()}`).emit('approval:updated', {
-      approvalId: id,
-      status: 'APPROVED',
-    });
+    emitToOrgProject(
+      '',
+      approval.projectId.toString(),
+      'approval:updated',
+      { approvalId: id, status: 'APPROVED' }
+    );
   } catch (err) {
     logger.warn({ err }, 'Socket emit failed');
   }

@@ -27,6 +27,7 @@ interface TeamMember {
   name: string;
   email: string;
   role: string;
+  orgRole?: string;
   isActive: boolean;
   lastLoginAt?: string;
   createdAt: string;
@@ -84,7 +85,13 @@ export function TeamPage() {
 
   const toggleActiveMutation = useMutation({
     mutationFn: async ({ id, isActive }: { id: string; isActive: boolean }) => {
-      await api.patch(`/admin/team/${id}/${isActive ? 'deactivate' : 'activate'}`);
+      if (isActive) {
+        // Deactivate
+        await api.patch(`/admin/team/${id}/deactivate`);
+      } else {
+        // Reactivate — backend uses role update to re-enable; set isActive via role endpoint
+        await api.patch(`/admin/team/${id}/role`, { role: 'CONTRIBUTOR', isActive: true });
+      }
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['admin', 'team'] });
@@ -95,9 +102,16 @@ export function TeamPage() {
 
   const members = data || [];
 
+  // Stats — check both legacy role and orgRole
+  const isAdminOrOwner = (m: TeamMember) =>
+    ['ADMIN', 'SUPERADMIN', 'ORGANIZATION_OWNER', 'ORGANIZATION_ADMIN'].includes(m.role) ||
+    ['ORGANIZATION_OWNER', 'ORGANIZATION_ADMIN'].includes(m.orgRole ?? '');
+
   const roleColors: Record<string, string> = {
     SUPERADMIN: 'bg-violet-100 text-violet-700 dark:bg-violet-900/30 dark:text-violet-400',
     ADMIN: 'bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-400',
+    ORGANIZATION_OWNER: 'bg-violet-100 text-violet-700 dark:bg-violet-900/30 dark:text-violet-400',
+    ORGANIZATION_ADMIN: 'bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-400',
     PROJECT_MANAGER: 'bg-emerald-100 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-400',
     CONTRIBUTOR: 'bg-gray-100 text-gray-700 dark:bg-gray-800 dark:text-gray-300',
   };
@@ -120,7 +134,7 @@ export function TeamPage() {
         {[
           { label: 'Total', count: members.length, color: 'text-foreground' },
           { label: 'Active', count: members.filter(m => m.isActive).length, color: 'text-emerald-600' },
-          { label: 'Admins', count: members.filter(m => ['ADMIN', 'SUPERADMIN'].includes(m.role)).length, color: 'text-blue-600' },
+          { label: 'Admins', count: members.filter(m => isAdminOrOwner(m)).length, color: 'text-blue-600' },
           { label: 'Inactive', count: members.filter(m => !m.isActive).length, color: 'text-muted-foreground' },
         ].map((stat) => (
           <Card key={stat.label}>

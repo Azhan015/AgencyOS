@@ -3,6 +3,7 @@ import { z } from 'zod';
 import * as controller from './clients.controller';
 import { authenticate } from '../../middleware/authenticate';
 import { authorize } from '../../middleware/authorize';
+import { tenantScope } from '../../middleware/tenantScope';
 import { validateBody } from '../../middleware/validate';
 
 const router = Router();
@@ -28,8 +29,8 @@ router.post(
   controller.acceptInvite
 );
 
-// All routes below require authentication
-router.use(authenticate);
+// All routes below require authentication + tenant scope
+router.use(authenticate, tenantScope);
 
 router.get('/', authorize('clients:read'), controller.list);
 router.post('/', authorize('clients:write'), validateBody(createClientSchema), controller.create);

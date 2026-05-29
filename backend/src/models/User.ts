@@ -1,7 +1,21 @@
 import mongoose, { Document, Schema, Model } from 'mongoose';
 import argon2 from 'argon2';
 
+/**
+ * Legacy single-tenant role — kept for backward compatibility during migration.
+ * New code should use OrgRole from authorize.ts.
+ */
 export type UserRole = 'SUPERADMIN' | 'ADMIN' | 'PROJECT_MANAGER' | 'CONTRIBUTOR' | 'CLIENT';
+
+/**
+ * Multi-tenant org-scoped role — replaces UserRole for all new code.
+ */
+export type OrgRole =
+  | 'ORGANIZATION_OWNER'
+  | 'ORGANIZATION_ADMIN'
+  | 'PROJECT_MANAGER'
+  | 'CONTRIBUTOR'
+  | 'CLIENT';
 
 export interface IDevice {
   deviceId: string;
@@ -25,7 +39,12 @@ export interface IUser extends Document {
   passwordHash?: string;
   name: string;
   avatar?: string;
+  // Legacy role — kept for backward compatibility during migration
   role: UserRole;
+  // New multi-tenant org role — required for all new code
+  orgRole: OrgRole;
+  // Organization this user belongs to (required for multi-tenant; optional during migration)
+  organizationId?: mongoose.Types.ObjectId;
   clientId?: mongoose.Types.ObjectId;
   isActive: boolean;
   lastLoginAt?: Date;
@@ -64,19 +83,35 @@ const UserSchema = new Schema<IUser, IUserModel>({
   email: {
     type: String,
     required: true,
-    unique: true,
     lowercase: true,
     trim: true,
-    index: true,
   },
   passwordHash: { type: String, select: false },
   name: { type: String, required: true, trim: true },
   avatar: String,
+  // Legacy role — kept for backward compatibility during migration
   role: {
     type: String,
     enum: ['SUPERADMIN', 'ADMIN', 'PROJECT_MANAGER', 'CONTRIBUTOR', 'CLIENT'],
     required: true,
     default: 'CLIENT',
+  },
+  // New multi-tenant org role
+  orgRole: {
+    type: String,
+    enum: ['ORGANIZATION_OWNER', 'ORGANIZATION_ADMIN', 'PROJECT_MANAGER', 'CONTRIBUTOR', 'CLIENT'],
+    required: true,
+    default: 'CLIENT',
+  },
+  // Organization this user belongs to
+  organizationId: {
+    type: Schema.Types.ObjectId,
+    ref: 'Organization',
+    // NOTE: required will be enforced in Phase 2 after migration.
+    // During Phase 1, existing code paths (register, Google OAuth) may not
+    // have org context yet. The field is indexed for query performance.
+    index: true,
+    sparse: true,
   },
   clientId: { type: Schema.Types.ObjectId, ref: 'Client', index: true },
   isActive: { type: Boolean, default: true },
@@ -93,7 +128,11 @@ const UserSchema = new Schema<IUser, IUserModel>({
 });
 
 // Indexes
-UserSchema.index({ email: 1 });
+// email is unique per organization (not globally unique)
+UserSchema.index({ organizationId: 1, email: 1 }, { unique: true });
+UserSchema.index({ organizationId: 1, orgRole: 1 });
+UserSchema.index({ organizationId: 1, isActive: 1 });
+UserSchema.index({ organizationId: 1, clientId: 1 }, { sparse: true });
 UserSchema.index({ clientId: 1, role: 1 });
 UserSchema.index({ googleId: 1 }, { sparse: true });
 

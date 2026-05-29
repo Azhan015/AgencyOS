@@ -9,6 +9,7 @@ export interface IReadReceipt {
 
 export interface IMessage extends Document {
   _id: mongoose.Types.ObjectId;
+  organizationId: mongoose.Types.ObjectId;
   projectId: mongoose.Types.ObjectId;
   channelId: mongoose.Types.ObjectId;
   senderId: mongoose.Types.ObjectId;
@@ -31,6 +32,12 @@ const ReadReceiptSchema = new Schema<IReadReceipt>({
 }, { _id: false });
 
 const MessageSchema = new Schema<IMessage>({
+  organizationId: {
+    type: Schema.Types.ObjectId,
+    ref: 'Organization',
+    required: true,
+    index: true,
+  },
   projectId: { type: Schema.Types.ObjectId, ref: 'Project', required: true, index: true },
   channelId: { type: Schema.Types.ObjectId, required: true, index: true },
   senderId: { type: Schema.Types.ObjectId, ref: 'User', required: true },
@@ -53,6 +60,7 @@ const MessageSchema = new Schema<IMessage>({
   toObject: { virtuals: true },
 });
 
+MessageSchema.index({ organizationId: 1, channelId: 1, createdAt: -1 });
 MessageSchema.index({ projectId: 1, createdAt: -1 });
 MessageSchema.index({ channelId: 1, createdAt: -1 });
 MessageSchema.index({ content: 'text' });

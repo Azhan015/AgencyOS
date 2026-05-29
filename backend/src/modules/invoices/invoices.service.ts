@@ -10,11 +10,13 @@ import { env } from '../../config/env';
 import { logger } from '../../lib/logger';
 import mongoose from 'mongoose';
 
-async function getNextInvoiceNumber(): Promise<string> {
+async function getNextInvoiceNumber(organizationId?: string): Promise<string> {
   const year = new Date().getFullYear();
-  const count = await Invoice.countDocuments({
+  const filter: Record<string, unknown> = {
     invoiceNumber: { $regex: `^INV-${year}-` },
-  });
+  };
+  if (organizationId) filter.organizationId = organizationId;
+  const count = await Invoice.countDocuments(filter);
   const padded = String(count + 1).padStart(4, '0');
   return `INV-${year}-${padded}`;
 }
@@ -27,10 +29,12 @@ export async function listInvoices(query: {
   limit?: number;
   userRole?: string;
   userId?: string;
+  organizationId?: string;
 }) {
-  const { clientId, projectId, status, page = 1, limit = 20, userRole } = query;
-  const filter: Record<string, unknown> = {};
+  const { clientId, projectId, status, page = 1, limit = 20, organizationId } = query;
 
+  const filter: Record<string, unknown> = {};
+  if (organizationId) filter.organizationId = organizationId;
   if (clientId) filter.clientId = clientId;
   if (projectId) filter.projectId = projectId;
   if (status) filter.status = status;
@@ -50,8 +54,11 @@ export async function listInvoices(query: {
   return { invoices, total, page, limit, pages: Math.ceil(total / limit) };
 }
 
-export async function getInvoice(id: string): Promise<IInvoice> {
-  const invoice = await Invoice.findById(id)
+export async function getInvoice(id: string, organizationId?: string): Promise<IInvoice> {
+  const filter: Record<string, unknown> = { _id: id };
+  if (organizationId) filter.organizationId = organizationId;
+
+  const invoice = await Invoice.findOne(filter)
     .populate('clientId', 'companyName contactName email stripeCustomerId')
     .populate('projectId', 'name slug')
     .populate('createdBy', 'name email');
@@ -70,8 +77,9 @@ export async function createInvoice(data: {
   dueDate: Date;
   notes?: string;
   createdBy: string;
+  organizationId?: string;
 }): Promise<IInvoice> {
-  const invoiceNumber = await getNextInvoiceNumber();
+  const invoiceNumber = await getNextInvoiceNumber(data.organizationId);
 
   const lineItems = data.lineItems.map(item => ({
     ...item,
@@ -100,8 +108,11 @@ export async function createInvoice(data: {
   return invoice;
 }
 
-export async function updateInvoice(id: string, data: Partial<IInvoice>): Promise<IInvoice> {
-  const invoice = await Invoice.findById(id);
+export async function updateInvoice(id: string, data: Partial<IInvoice>, organizationId?: string): Promise<IInvoice> {
+  const filter: Record<string, unknown> = { _id: id };
+  if (organizationId) filter.organizationId = organizationId;
+
+  const invoice = await Invoice.findOne(filter);
   if (!invoice) throw new NotFoundError('Invoice');
 
   if (['SENT', 'PAID', 'VOID'].includes(invoice.status)) {
@@ -124,7 +135,7 @@ export async function updateInvoice(id: string, data: Partial<IInvoice>): Promis
     (data as Record<string, unknown>).total = subtotal - discount + tax;
   }
 
-  const updated = await Invoice.findByIdAndUpdate(id, { $set: data }, { new: true });
+  const updated = await Invoice.findOneAndUpdate(filter, { $set: data }, { new: true });
   if (!updated) throw new NotFoundError('Invoice');
   return updated;
 }

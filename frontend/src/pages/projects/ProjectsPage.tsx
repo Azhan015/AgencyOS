@@ -37,6 +37,9 @@ export function ProjectsPage() {
   const queryClient = useQueryClient();
   const { user } = useAuthStore();
 
+  const canCreate = user && ['ADMIN', 'SUPERADMIN', 'PROJECT_MANAGER', 'ORGANIZATION_OWNER', 'ORGANIZATION_ADMIN'].includes(user.orgRole || user.role);
+  const canReadClients = canCreate; // same roles can read clients
+
   const { data, isLoading } = useQuery({
     queryKey: ['projects', { search, status: statusFilter }],
     queryFn: async () => {
@@ -54,7 +57,7 @@ export function ProjectsPage() {
       const res = await api.get('/clients?limit=100');
       return res.data.data;
     },
-    enabled: ['ADMIN', 'SUPERADMIN', 'PROJECT_MANAGER'].includes(user?.role || ''),
+    enabled: canReadClients ?? false,
   });
 
   const { register, handleSubmit, reset, formState: { errors } } = useForm<CreateProjectForm>({
@@ -75,8 +78,6 @@ export function ProjectsPage() {
     },
     onError: () => toast.error('Failed to create project'),
   });
-
-  const canCreate = user && ['ADMIN', 'SUPERADMIN', 'PROJECT_MANAGER'].includes(user.role);
 
   const statuses = ['SCOPING', 'ACTIVE', 'REVIEW', 'COMPLETED', 'ARCHIVED'];
 

@@ -161,3 +161,45 @@ export async function cacheDelPattern(pattern: string): Promise<void> {
     // Silently ignore
   }
 }
+
+// ── Org-namespaced cache helpers ──────────────────────────────────────────────
+// All keys follow: org:{orgId}:{subkey}
+// Use these in service files instead of bare cacheGet/Set/Del for org-scoped data.
+
+export async function orgCacheGet<T>(orgId: string, key: string): Promise<T | null> {
+  return cacheGet<T>(`org:${orgId}:${key}`);
+}
+
+export async function orgCacheSet(
+  orgId: string,
+  key: string,
+  value: unknown,
+  ttlSeconds?: number
+): Promise<void> {
+  return cacheSet(`org:${orgId}:${key}`, value, ttlSeconds);
+}
+
+export async function orgCacheDel(orgId: string, ...keys: string[]): Promise<void> {
+  if (!redisAvailable || !redisClient) return;
+  try {
+    const fullKeys = keys.map(k => `org:${orgId}:${k}`);
+    await redisClient.del(fullKeys);
+  } catch {
+    // Silently ignore
+  }
+}
+
+// ── Session tracking — used by authenticate.ts ────────────────────────────────
+// Tracks active sessionIds per org so they can be bulk-revoked on suspension.
+
+export async function trackOrgSession(orgId: string, sessionId: string): Promise<void> {
+  if (!redisAvailable || !redisClient) return;
+  try {
+    const key = `org:sessions:${orgId}`;
+    await redisClient.sAdd(key, sessionId);
+    // TTL matches refresh token lifetime (7 days)
+    await redisClient.expire(key, 7 * 24 * 3600);
+  } catch {
+    // Non-fatal
+  }
+}

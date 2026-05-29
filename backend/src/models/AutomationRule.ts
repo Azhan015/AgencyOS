@@ -28,6 +28,7 @@ export interface IAction {
 
 export interface IAutomationRule extends Document {
   _id: mongoose.Types.ObjectId;
+  organizationId: mongoose.Types.ObjectId;
   name: string;
   description?: string;
   isActive: boolean;
@@ -64,6 +65,12 @@ const ActionSchema = new Schema<IAction>({
 }, { _id: false });
 
 const AutomationRuleSchema = new Schema<IAutomationRule>({
+  organizationId: {
+    type: Schema.Types.ObjectId,
+    ref: 'Organization',
+    required: true,
+    index: true,
+  },
   name: { type: String, required: true },
   description: String,
   isActive: { type: Boolean, default: true },
@@ -86,6 +93,7 @@ const AutomationRuleSchema = new Schema<IAutomationRule>({
   createdBy: { type: Schema.Types.ObjectId, ref: 'User', required: true },
 }, { timestamps: true });
 
+AutomationRuleSchema.index({ organizationId: 1, isActive: 1, 'trigger.event': 1 });
 AutomationRuleSchema.index({ isActive: 1, 'trigger.event': 1 });
 
 export const AutomationRule = mongoose.model<IAutomationRule>('AutomationRule', AutomationRuleSchema);

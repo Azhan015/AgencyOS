@@ -12,6 +12,7 @@ export interface ILineItem {
 
 export interface IInvoice extends Document {
   _id: mongoose.Types.ObjectId;
+  organizationId: mongoose.Types.ObjectId;
   invoiceNumber: string;
   clientId: mongoose.Types.ObjectId;
   projectId?: mongoose.Types.ObjectId;
@@ -48,7 +49,14 @@ const LineItemSchema = new Schema<ILineItem>({
 }, { _id: false });
 
 const InvoiceSchema = new Schema<IInvoice>({
-  invoiceNumber: { type: String, required: true, unique: true, index: true },
+  organizationId: {
+    type: Schema.Types.ObjectId,
+    ref: 'Organization',
+    required: true,
+    index: true,
+  },
+  // invoiceNumber is unique per organization (not globally)
+  invoiceNumber: { type: String, required: true, index: true },
   clientId: { type: Schema.Types.ObjectId, ref: 'Client', required: true, index: true },
   projectId: { type: Schema.Types.ObjectId, ref: 'Project' },
   milestoneId: { type: Schema.Types.ObjectId },
@@ -85,6 +93,9 @@ const InvoiceSchema = new Schema<IInvoice>({
   toObject: { virtuals: true },
 });
 
+InvoiceSchema.index({ organizationId: 1, invoiceNumber: 1 }, { unique: true });
+InvoiceSchema.index({ organizationId: 1, status: 1, dueDate: 1 });
+InvoiceSchema.index({ organizationId: 1, clientId: 1 });
 InvoiceSchema.index({ clientId: 1, status: 1 });
 InvoiceSchema.index({ projectId: 1 });
 InvoiceSchema.index({ dueDate: 1, status: 1 });

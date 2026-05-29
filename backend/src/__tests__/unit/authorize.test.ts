@@ -8,7 +8,7 @@ import type { Response, NextFunction } from 'express';
 
 function makeReq(role: string): AuthRequest {
   return {
-    user: { id: 'u1', email: 'a@b.com', role, name: 'Test', sessionId: 's1' },
+    user: { id: 'u1', email: 'a@b.com', role, orgRole: role, organizationId: 'org-1', name: 'Test', sessionId: 's1', isPlatformUser: false },
   } as unknown as AuthRequest;
 }
 
