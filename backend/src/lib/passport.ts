@@ -62,6 +62,19 @@ export function initPassport(): void {
             return done(null, user as unknown as Express.User);
           }
 
+          // ── Registration gate ──────────────────────────────────────────
+          // New Google users can only be created when no users exist yet
+          // (first-time setup). After that, the SUPERADMIN adds users via
+          // the admin dashboard — they cannot self-register via Google.
+          const userCount = await User.countDocuments();
+          if (userCount > 0) {
+            logger.warn({ email }, 'Google OAuth blocked — registration is locked');
+            return done(
+              new Error('Registration is closed. Contact your agency administrator to get access.'),
+              undefined
+            );
+          }
+
           // Create new user from Google profile
           const derivedName =
             profile.displayName?.trim() ||

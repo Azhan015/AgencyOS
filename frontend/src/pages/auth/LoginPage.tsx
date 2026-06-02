@@ -8,6 +8,7 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { useLogin, useMagicLink } from '@/hooks/useAuth';
 import { Logo } from '@/components/ui/logo';
+import axios from 'axios';
 
 const loginSchema = z.object({
   email: z.string().email('Invalid email'),
@@ -46,6 +47,7 @@ export function LoginPage() {
   const [magicEmail, setMagicEmail] = useState('');
   const [magicSent, setMagicSent] = useState(false);
   const [loginError, setLoginError] = useState<string | null>(null);
+  const [registrationOpen, setRegistrationOpen] = useState<boolean | null>(null);
   const [searchParams] = useSearchParams();
 
   const login = useLogin();
@@ -67,6 +69,15 @@ export function LoginPage() {
       );
     }
   }, [searchParams]);
+
+  // Check registration status to decide whether to show the "Create account" link
+  useEffect(() => {
+    const apiUrl = import.meta.env.VITE_API_URL || 'http://localhost:5000/api/v1';
+    axios
+      .get(`${apiUrl}/auth/registration-status`)
+      .then((res) => setRegistrationOpen(res.data?.data?.open ?? false))
+      .catch(() => setRegistrationOpen(false));
+  }, []);
 
   const onSubmit = (data: LoginForm) => {
     setLoginError(null);
@@ -189,12 +200,15 @@ export function LoginPage() {
                 Sign in with Google
               </Button>
 
-              <p className="text-center text-sm text-muted-foreground">
-                Don't have an account?{' '}
-                <Link to="/auth/register" className="text-primary hover:underline font-medium">
-                  Create one
-                </Link>
-              </p>
+              {/* Only show the register link during first-time setup (when no users exist) */}
+              {registrationOpen && (
+                <p className="text-center text-sm text-muted-foreground">
+                  First time here?{' '}
+                  <Link to="/auth/register" className="text-primary hover:underline font-medium">
+                    Set up your agency
+                  </Link>
+                </p>
+              )}
             </form>
           ) : (
             <div className="space-y-4">

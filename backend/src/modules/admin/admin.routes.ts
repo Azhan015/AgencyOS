@@ -45,7 +45,7 @@ router.get('/team', async (req: AuthRequest, _res, next) => {
 router.post('/team/invite', validateBody(z.object({
   email: z.string().email(),
   name: z.string().min(1),
-  role: z.enum(['ADMIN', 'PROJECT_MANAGER', 'CONTRIBUTOR']),
+  role: z.enum(['ADMIN', 'PROJECT_MANAGER', 'CONTRIBUTOR', 'CLIENT']),
 })), async (req: AuthRequest, res, next) => {
   try {
     const { email, name, role } = req.body;
@@ -94,7 +94,7 @@ router.post('/team/invite', validateBody(z.object({
 });
 
 router.patch('/team/:id/role', validateBody(z.object({
-  role: z.enum(['ADMIN', 'PROJECT_MANAGER', 'CONTRIBUTOR']),
+  role: z.enum(['ADMIN', 'PROJECT_MANAGER', 'CONTRIBUTOR', 'CLIENT']),
 })), async (req: AuthRequest, res, next) => {
   try {
     const orgRoleMap: Record<string, string> = {

@@ -1,12 +1,11 @@
 import argon2 from 'argon2';
 import { v4 as uuidv4 } from 'uuid';
 import { User, IUser } from '../../models/User';
-import { Client } from '../../models/Client';
 import { signAccessToken, signRefreshToken, verifyRefreshToken } from '../../lib/jwt';
 import { generateSecureToken, hashSHA256 } from '../../lib/crypto';
 import { cacheGet, cacheSet, cacheDel } from '../../config/redis';
 import { sendEmail, getMagicLinkEmail, getPasswordResetEmail } from '../../lib/email';
-import { AuthenticationError, NotFoundError, ConflictError, ValidationError } from '../../lib/errors';
+import { AuthenticationError, NotFoundError, ConflictError, ForbiddenError } from '../../lib/errors';
 import { env } from '../../config/env';
 import { logger } from '../../lib/logger';
 
@@ -24,6 +23,22 @@ export interface LoginResult extends TokenPair {
   user: Partial<IUser>;
 }
 
+/**
+ * Check whether public registration is currently open.
+ *
+ * Rules:
+ *  - If there are ZERO users in the database → registration is OPEN (first-time setup).
+ *  - If at least one user exists (i.e. a SUPERADMIN has been created) → registration is LOCKED.
+ *
+ * After the first account is created it becomes SUPERADMIN automatically.
+ * All subsequent users (team members, clients) are added by the SUPERADMIN
+ * through the admin dashboard — they never go through the public register endpoint.
+ */
+export async function isRegistrationOpen(): Promise<boolean> {
+  const count = await User.countDocuments();
+  return count === 0;
+}
+
 export async function register(data: {
   email: string;
   password: string;
@@ -33,6 +48,17 @@ export async function register(data: {
   orgRole?: string;
   deviceInfo?: { deviceId: string; userAgent: string; ip: string };
 }): Promise<LoginResult> {
+  // ── Registration gate ────────────────────────────────────────────────────
+  // Public registration is only allowed when no users exist yet (first-time
+  // setup). Once the first account is created it becomes SUPERADMIN and the
+  // register endpoint is locked for everyone else.
+  const open = await isRegistrationOpen();
+  if (!open) {
+    throw new ForbiddenError(
+      'Registration is closed. Contact your agency administrator to get access.'
+    );
+  }
+
   const existing = await User.findByEmail(data.email);
   if (existing) throw new ConflictError('Email already registered');
 
