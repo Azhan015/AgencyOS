@@ -11,6 +11,7 @@ export interface IRevision {
 
 export interface IApproval extends Document {
   _id: mongoose.Types.ObjectId;
+  organizationId: mongoose.Types.ObjectId;
   projectId: mongoose.Types.ObjectId;
   milestoneId?: mongoose.Types.ObjectId;
   fileIds: mongoose.Types.ObjectId[];
@@ -35,6 +36,12 @@ const RevisionSchema = new Schema<IRevision>({
 }, { _id: false });
 
 const ApprovalSchema = new Schema<IApproval>({
+  organizationId: {
+    type: Schema.Types.ObjectId,
+    ref: 'Organization',
+    required: true,
+    index: true,
+  },
   projectId: { type: Schema.Types.ObjectId, ref: 'Project', required: true, index: true },
   milestoneId: { type: Schema.Types.ObjectId },
   fileIds: [{ type: Schema.Types.ObjectId, ref: 'File' }],
@@ -57,6 +64,7 @@ const ApprovalSchema = new Schema<IApproval>({
   toObject: { virtuals: true },
 });
 
+ApprovalSchema.index({ organizationId: 1, projectId: 1, status: 1 });
 ApprovalSchema.index({ projectId: 1, status: 1 });
 ApprovalSchema.index({ submittedBy: 1 });
 

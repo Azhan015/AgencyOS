@@ -177,6 +177,8 @@ router.get(
       const accessToken = signAccessToken({
         sub: user._id.toString(),
         role: user.role,
+        orgRole: user.orgRole || user.role,
+        organizationId: user.organizationId?.toString() || '',
         clientId: user.clientId?.toString(),
         sessionId,
       });
@@ -185,6 +187,7 @@ router.get(
         sub: user._id.toString(),
         sessionId,
         family: tokenFamily,
+        organizationId: user.organizationId?.toString() || '',
       });
 
       // Store refresh token hash in Redis

@@ -4,6 +4,7 @@ export type ChannelType = 'PROJECT' | 'DIRECT' | 'ANNOUNCEMENT';
 
 export interface IChannel extends Document {
   _id: mongoose.Types.ObjectId;
+  organizationId: mongoose.Types.ObjectId;
   projectId?: mongoose.Types.ObjectId;
   name: string;
   type: ChannelType;
@@ -16,6 +17,12 @@ export interface IChannel extends Document {
 }
 
 const ChannelSchema = new Schema<IChannel>({
+  organizationId: {
+    type: Schema.Types.ObjectId,
+    ref: 'Organization',
+    required: true,
+    index: true,
+  },
   projectId: { type: Schema.Types.ObjectId, ref: 'Project', index: true },
   name: { type: String, required: true, trim: true },
   type: {
@@ -31,6 +38,7 @@ const ChannelSchema = new Schema<IChannel>({
   timestamps: true,
 });
 
+ChannelSchema.index({ organizationId: 1, projectId: 1 });
 ChannelSchema.index({ projectId: 1 });
 ChannelSchema.index({ members: 1 });
 

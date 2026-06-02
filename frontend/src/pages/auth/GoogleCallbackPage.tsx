@@ -57,6 +57,8 @@ export function GoogleCallbackPage() {
             email: String(user.email ?? ''),
             name: String(user.name ?? 'User'),
             role: String(user.role ?? 'CLIENT'),
+            orgRole: user.orgRole ? String(user.orgRole) : undefined,
+            organizationId: user.organizationId ? String(user.organizationId) : undefined,
             clientId: user.clientId ? String(user.clientId) : undefined,
             avatar: typeof user.avatar === 'string' ? user.avatar : undefined,
           },

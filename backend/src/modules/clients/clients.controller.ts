@@ -11,6 +11,7 @@ export async function list(req: AuthRequest, res: Response, next: NextFunction):
       status,
       search,
       pmId,
+      organizationId: req.user?.organizationId,
     });
     res.json({ success: true, data: result });
   } catch (error) { next(error); }
@@ -18,28 +19,31 @@ export async function list(req: AuthRequest, res: Response, next: NextFunction):
 
 export async function getOne(req: AuthRequest, res: Response, next: NextFunction): Promise<void> {
   try {
-    const client = await service.getClient(req.params.id);
+    const client = await service.getClient(req.params.id, req.user?.organizationId);
     res.json({ success: true, data: client });
   } catch (error) { next(error); }
 }
 
 export async function create(req: AuthRequest, res: Response, next: NextFunction): Promise<void> {
   try {
-    const client = await service.createClient(req.body);
+    const client = await service.createClient({
+      ...req.body,
+      organizationId: req.user?.organizationId,
+    });
     res.status(201).json({ success: true, data: client });
   } catch (error) { next(error); }
 }
 
 export async function update(req: AuthRequest, res: Response, next: NextFunction): Promise<void> {
   try {
-    const client = await service.updateClient(req.params.id, req.body);
+    const client = await service.updateClient(req.params.id, req.body, req.user?.organizationId);
     res.json({ success: true, data: client });
   } catch (error) { next(error); }
 }
 
 export async function remove(req: AuthRequest, res: Response, next: NextFunction): Promise<void> {
   try {
-    await service.deleteClient(req.params.id);
+    await service.deleteClient(req.params.id, req.user?.organizationId);
     res.json({ success: true, message: 'Client deleted' });
   } catch (error) { next(error); }
 }
@@ -83,7 +87,7 @@ export async function acceptInvite(req: AuthRequest, res: Response, next: NextFu
 
 export async function getAnalytics(req: AuthRequest, res: Response, next: NextFunction): Promise<void> {
   try {
-    const analytics = await service.getClientAnalytics(req.params.id);
+    const analytics = await service.getClientAnalytics(req.params.id, req.user?.organizationId);
     res.json({ success: true, data: analytics });
   } catch (error) { next(error); }
 }

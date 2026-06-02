@@ -17,6 +17,7 @@ export type NotificationType =
 
 export interface INotification extends Document {
   _id: mongoose.Types.ObjectId;
+  organizationId: mongoose.Types.ObjectId;
   userId: mongoose.Types.ObjectId;
   type: NotificationType;
   title: string;
@@ -29,6 +30,12 @@ export interface INotification extends Document {
 }
 
 const NotificationSchema = new Schema<INotification>({
+  organizationId: {
+    type: Schema.Types.ObjectId,
+    ref: 'Organization',
+    required: true,
+    index: true,
+  },
   userId: { type: Schema.Types.ObjectId, ref: 'User', required: true, index: true },
   type: {
     type: String,
@@ -52,7 +59,10 @@ const NotificationSchema = new Schema<INotification>({
   toObject: { virtuals: true },
 });
 
-// TTL index: auto-delete after 90 days
+// TTL index: auto-delete after 90 days (org-scoped)
+NotificationSchema.index({ organizationId: 1, createdAt: 1 }, { expireAfterSeconds: 7776000 });
+NotificationSchema.index({ organizationId: 1, userId: 1, isRead: 1 });
+// Legacy indexes kept for backward compatibility
 NotificationSchema.index({ createdAt: 1 }, { expireAfterSeconds: 7776000 });
 NotificationSchema.index({ userId: 1, isRead: 1, createdAt: -1 });
 

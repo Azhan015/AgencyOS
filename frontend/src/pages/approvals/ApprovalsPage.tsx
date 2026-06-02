@@ -56,10 +56,10 @@ export function ApprovalsPage() {
     onError: () => toast.error('Failed to submit review'),
   });
 
-  // ADMIN/SUPERADMIN/PROJECT_MANAGER can approve on behalf of agency
-  // CLIENT can approve/reject their own deliverables
-  const canReview = user && ['ADMIN', 'SUPERADMIN', 'PROJECT_MANAGER', 'CLIENT'].includes(user.role);
-  const isClient = user?.role === 'CLIENT';
+  const effectiveRole = user?.orgRole || user?.role || '';
+  const canReview = user && ['ADMIN', 'SUPERADMIN', 'PROJECT_MANAGER', 'CLIENT',
+    'ORGANIZATION_OWNER', 'ORGANIZATION_ADMIN'].includes(effectiveRole);
+  const isClient = effectiveRole === 'CLIENT';
   const statuses = ['PENDING', 'APPROVED', 'REJECTED', 'REVISION_REQUESTED'];
   const approvals: Approval[] = data?.approvals || [];
 

@@ -5,6 +5,7 @@
  */
 import request from 'supertest';
 import { connectTestDb, clearTestDb, disconnectTestDb } from '../setup/testDb';
+import { resetTestOrgCache } from '../setup/testFixtures';
 
 // ── Mocks (must be before app import) ─────────────────────────────────────────
 jest.mock('../../config/redis', () => ({
@@ -33,7 +34,7 @@ import app from '../../app';
 const API = '/api/v1';
 
 beforeAll(async () => { await connectTestDb(); });
-afterEach(async () => { await clearTestDb(); });
+afterEach(async () => { await clearTestDb(); resetTestOrgCache(); });
 afterAll(async () => { await disconnectTestDb(); });
 
 // ── Health check ──────────────────────────────────────────────────────────────

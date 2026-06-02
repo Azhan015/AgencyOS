@@ -5,6 +5,7 @@ export type ClientStatus = 'INVITED' | 'ONBOARDING' | 'ACTIVE' | 'SUSPENDED';
 
 export interface IClient extends Document {
   _id: mongoose.Types.ObjectId;
+  organizationId?: mongoose.Types.ObjectId;
   slug: string;
   companyName: string;
   contactName: string;
@@ -28,7 +29,14 @@ export interface IClientModel extends Model<IClient> {
 }
 
 const ClientSchema = new Schema<IClient, IClientModel>({
-  slug: { type: String, required: true, unique: true, index: true },
+  organizationId: {
+    type: Schema.Types.ObjectId,
+    ref: 'Organization',
+    required: true,
+    index: true,
+  },
+  // slug is unique per organization (not globally)
+  slug: { type: String, required: true, index: true },
   companyName: { type: String, required: true, trim: true },
   contactName: { type: String, required: true, trim: true },
   email: { type: String, required: true, lowercase: true, trim: true, index: true },
@@ -66,6 +74,9 @@ const ClientSchema = new Schema<IClient, IClientModel>({
   toObject: { virtuals: true },
 });
 
+ClientSchema.index({ organizationId: 1, slug: 1 }, { unique: true });
+ClientSchema.index({ organizationId: 1, status: 1 });
+ClientSchema.index({ organizationId: 1, email: 1 });
 ClientSchema.index({ email: 1 });
 ClientSchema.index({ status: 1 });
 ClientSchema.index({ assignedPM: 1 });

@@ -2,11 +2,12 @@ import { Router } from 'express';
 import { z } from 'zod';
 import { authenticate, AuthRequest } from '../../middleware/authenticate';
 import { authorize } from '../../middleware/authorize';
+import { tenantScope } from '../../middleware/tenantScope';
 import { validateBody } from '../../middleware/validate';
 import * as service from './approvals.service';
 
 const router = Router();
-router.use(authenticate);
+router.use(authenticate, tenantScope);
 
 const createApprovalSchema = z.object({
   projectId: z.string().min(1),
@@ -19,21 +20,28 @@ const createApprovalSchema = z.object({
 
 router.get('/', authorize('approvals:read'), async (req: AuthRequest, res, next) => {
   try {
-    const result = await service.listApprovals(req.query as Record<string, string>);
+    const result = await service.listApprovals({
+      ...(req.query as Record<string, string>),
+      organizationId: req.user!.organizationId,
+    });
     res.json({ success: true, data: result });
   } catch (e) { next(e); }
 });
 
 router.post('/', authorize('approvals:write'), validateBody(createApprovalSchema), async (req: AuthRequest, res, next) => {
   try {
-    const approval = await service.createApproval({ ...req.body, submittedBy: req.user!.id });
+    const approval = await service.createApproval({
+      ...req.body,
+      submittedBy: req.user!.id,
+      organizationId: req.user!.organizationId,
+    });
     res.status(201).json({ success: true, data: approval });
   } catch (e) { next(e); }
 });
 
 router.get('/:id', authorize('approvals:read'), async (req: AuthRequest, res, next) => {
   try {
-    const approval = await service.getApproval(req.params.id);
+    const approval = await service.getApproval(req.params.id, req.user!.organizationId);
     res.json({ success: true, data: approval });
   } catch (e) { next(e); }
 });

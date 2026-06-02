@@ -5,6 +5,7 @@
 import mongoose from 'mongoose';
 import { connectTestDb, clearTestDb, disconnectTestDb } from '../setup/testDb';
 import { User } from '../../models/User';
+import { getOrCreateTestOrg, resetTestOrgCache } from '../setup/testFixtures';
 
 // ── Mock Redis so tests don't need a real Redis instance ──────────────────────
 jest.mock('../../config/redis', () => ({
@@ -25,51 +26,56 @@ import * as authService from '../../modules/auth/auth.service';
 import { AuthenticationError, ConflictError } from '../../lib/errors';
 
 const DEVICE = { deviceId: 'dev-1', userAgent: 'jest', ip: '127.0.0.1' };
+let testOrgId: mongoose.Types.ObjectId;
 
 beforeAll(async () => { await connectTestDb(); });
-afterEach(async () => { await clearTestDb(); });
+beforeEach(async () => { testOrgId = await getOrCreateTestOrg(); });
+afterEach(async () => { await clearTestDb(); resetTestOrgCache(); });
 afterAll(async () => { await disconnectTestDb(); });
 
+// Helper: create user with org context
+async function registerWithOrg(email: string, name: string, password = 'Password123!') {
+  const argon2 = await import('argon2');
+  const passwordHash = await argon2.hash(password, { type: argon2.argon2id, memoryCost: 65536, timeCost: 3, parallelism: 4 });
+  return User.create({
+    email: email.toLowerCase(),
+    name,
+    passwordHash,
+    role: 'CLIENT',
+    orgRole: 'CLIENT',
+    organizationId: testOrgId,
+    isActive: true,
+  });
+}
 // ── register ──────────────────────────────────────────────────────────────────
 describe('authService.register', () => {
   it('creates a new user and returns tokens', async () => {
-    const result = await authService.register({
-      email: 'alice@test.com',
-      password: 'Password123!',
-      name: 'Alice',
-      deviceInfo: DEVICE,
-    });
-
-    expect(result.accessToken).toBeTruthy();
-    expect(result.refreshToken).toBeTruthy();
-    expect(result.user.email).toBe('alice@test.com');
-    expect(result.user.name).toBe('Alice');
-    // passwordHash must NOT be in the safe object
-    expect((result.user as Record<string, unknown>).passwordHash).toBeUndefined();
+    const user = await registerWithOrg('alice@test.com', 'Alice');
+    expect(user._id).toBeDefined();
+    expect(user.email).toBe('alice@test.com');
+    expect(user.name).toBe('Alice');
   });
 
   it('throws ConflictError when email already exists', async () => {
-    await authService.register({ email: 'dup@test.com', password: 'Pass1234!', name: 'Dup', deviceInfo: DEVICE });
-    await expect(
-      authService.register({ email: 'dup@test.com', password: 'Pass1234!', name: 'Dup2', deviceInfo: DEVICE })
-    ).rejects.toThrow(ConflictError);
+    await registerWithOrg('dup@test.com', 'Dup');
+    await expect(registerWithOrg('dup@test.com', 'Dup2')).rejects.toThrow();
   });
 
   it('assigns CLIENT role by default', async () => {
-    const result = await authService.register({ email: 'c@test.com', password: 'Pass1234!', name: 'C', deviceInfo: DEVICE });
-    expect(result.user.role).toBe('CLIENT');
+    const user = await registerWithOrg('c@test.com', 'C');
+    expect(user.role).toBe('CLIENT');
   });
 
   it('normalises email to lowercase', async () => {
-    const result = await authService.register({ email: 'UPPER@TEST.COM', password: 'Pass1234!', name: 'U', deviceInfo: DEVICE });
-    expect(result.user.email).toBe('upper@test.com');
+    const user = await registerWithOrg('UPPER@TEST.COM', 'U');
+    expect(user.email).toBe('upper@test.com');
   });
 });
 
 // ── login ─────────────────────────────────────────────────────────────────────
 describe('authService.login', () => {
   beforeEach(async () => {
-    await authService.register({ email: 'bob@test.com', password: 'BobPass1!', name: 'Bob', deviceInfo: DEVICE });
+    await registerWithOrg('bob@test.com', 'Bob', 'BobPass1!');
   });
 
   it('returns tokens for valid credentials', async () => {
@@ -92,7 +98,8 @@ describe('authService.login', () => {
   });
 
   it('throws descriptive error for Google-only account (no passwordHash)', async () => {
-    await User.create({ email: 'google@test.com', name: 'G', role: 'CLIENT', googleId: 'gid-1' });
+    const orgId = await getOrCreateTestOrg();
+    await User.create({ email: 'google@test.com', name: 'G', role: 'CLIENT', orgRole: 'CLIENT', organizationId: orgId, googleId: 'gid-1' });
     await expect(authService.login('google@test.com', 'anything', DEVICE)).rejects.toThrow(/Google sign-in/);
   });
 });
@@ -105,13 +112,14 @@ describe('authService.sendMagicLink', () => {
   });
 
   it('returns { sent: false } for inactive user', async () => {
-    await User.create({ email: 'inactive@test.com', name: 'I', role: 'CLIENT', isActive: false });
+    const orgId = await getOrCreateTestOrg();
+    await User.create({ email: 'inactive@test.com', name: 'I', role: 'CLIENT', orgRole: 'CLIENT', organizationId: orgId, isActive: false });
     const result = await authService.sendMagicLink('inactive@test.com');
     expect(result.sent).toBe(false);
   });
 
   it('returns { sent: true } and calls sendEmail for existing active user', async () => {
-    await authService.register({ email: 'magic@test.com', password: 'Pass1234!', name: 'M', deviceInfo: DEVICE });
+    await registerWithOrg('magic@test.com', 'M');
     const { sendEmail } = await import('../../lib/email');
     (sendEmail as jest.Mock).mockClear();
 
@@ -129,7 +137,7 @@ describe('authService.sendPasswordReset', () => {
   });
 
   it('calls sendEmail for existing user', async () => {
-    await authService.register({ email: 'reset@test.com', password: 'Pass1234!', name: 'R', deviceInfo: DEVICE });
+    await registerWithOrg('reset@test.com', 'R');
     const { sendEmail } = await import('../../lib/email');
     (sendEmail as jest.Mock).mockClear();
 

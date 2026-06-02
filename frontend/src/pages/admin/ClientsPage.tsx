@@ -33,11 +33,11 @@ export function ClientsPage() {
   const queryClient = useQueryClient();
   const { user } = useAuthStore();
 
-  // Hard gate: only ADMIN and SUPERADMIN can access this page
-  const canAccess = user && ['ADMIN', 'SUPERADMIN'].includes(user.role);
+  // Hard gate: only ADMIN/SUPERADMIN/ORGANIZATION_OWNER/ORGANIZATION_ADMIN can access this page
+  const canAccess = user && ['ADMIN', 'SUPERADMIN', 'ORGANIZATION_OWNER', 'ORGANIZATION_ADMIN'].includes(user.orgRole || user.role);
   if (!canAccess) return <Navigate to="/dashboard" replace />;
 
-  const canWrite = user && ['ADMIN', 'SUPERADMIN'].includes(user.role);
+  const canWrite = canAccess;
 
   const { data, isLoading } = useQuery({
     queryKey: ['clients', { search }],

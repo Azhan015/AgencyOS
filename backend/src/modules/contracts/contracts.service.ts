@@ -16,9 +16,11 @@ export async function listContracts(query: {
   status?: string;
   page?: number;
   limit?: number;
+  organizationId?: string;
 }) {
-  const { clientId, projectId, status, page = 1, limit = 20 } = query;
+  const { clientId, projectId, status, page = 1, limit = 20, organizationId } = query;
   const filter: Record<string, unknown> = {};
+  if (organizationId) filter.organizationId = organizationId;
   if (clientId) filter.clientId = clientId;
   if (projectId) filter.projectId = projectId;
   if (status) filter.status = status;
@@ -38,8 +40,10 @@ export async function listContracts(query: {
   return { contracts, total, page, limit };
 }
 
-export async function getContract(id: string): Promise<IContract> {
-  const contract = await Contract.findById(id)
+export async function getContract(id: string, organizationId?: string): Promise<IContract> {
+  const filter: Record<string, unknown> = { _id: id };
+  if (organizationId) filter.organizationId = organizationId;
+  const contract = await Contract.findOne(filter)
     .populate('clientId', 'companyName contactName email')
     .populate('projectId', 'name slug')
     .populate('createdBy', 'name email');
@@ -57,6 +61,7 @@ export async function createContract(data: {
   variables?: Record<string, unknown>;
   expiresAt?: Date;
   createdBy: string;
+  organizationId?: string;
 }): Promise<IContract> {
   let content = data.content || '';
 
@@ -77,15 +82,15 @@ export async function createContract(data: {
   return contract;
 }
 
-export async function updateContract(id: string, data: Partial<IContract>): Promise<IContract> {
-  const contract = await Contract.findById(id);
+export async function updateContract(id: string, data: Partial<IContract>, organizationId?: string): Promise<IContract> {
+  const filter: Record<string, unknown> = { _id: id };
+  if (organizationId) filter.organizationId = organizationId;
+  const contract = await Contract.findOne(filter);
   if (!contract) throw new NotFoundError('Contract');
-
   if (['SIGNED', 'EXECUTED'].includes(contract.status)) {
     throw new ValidationError('Cannot edit a signed or executed contract');
   }
-
-  const updated = await Contract.findByIdAndUpdate(id, { $set: data }, { new: true });
+  const updated = await Contract.findOneAndUpdate(filter, { $set: data }, { new: true });
   return updated!;
 }
 
@@ -216,8 +221,10 @@ export async function signContract(id: string, data: {
   return updated;
 }
 
-export async function listTemplates() {
-  return ContractTemplate.find().sort({ name: 1 }).lean();
+export async function listTemplates(organizationId?: string) {
+  const filter: Record<string, unknown> = {};
+  if (organizationId) filter.organizationId = organizationId;
+  return ContractTemplate.find(filter).sort({ name: 1 }).lean();
 }
 
 export async function createTemplate(data: {
@@ -226,6 +233,7 @@ export async function createTemplate(data: {
   content: string;
   variables?: string[];
   createdBy: string;
+  organizationId?: string;
 }) {
   return ContractTemplate.create(data);
 }

@@ -45,8 +45,11 @@ export function FilesPage() {
     onError: () => toast.error('Failed to delete file'),
   });
 
-  const canDelete = user && ['ADMIN', 'SUPERADMIN', 'PROJECT_MANAGER'].includes(user.role);
-  const canUpload = user && ['ADMIN', 'SUPERADMIN', 'PROJECT_MANAGER', 'CONTRIBUTOR'].includes(user.role);
+  const effectiveRole = user?.orgRole || user?.role || '';
+  const canDelete = user && ['ADMIN', 'SUPERADMIN', 'PROJECT_MANAGER',
+    'ORGANIZATION_OWNER', 'ORGANIZATION_ADMIN'].includes(effectiveRole);
+  const canUpload = user && ['ADMIN', 'SUPERADMIN', 'PROJECT_MANAGER', 'CONTRIBUTOR',
+    'ORGANIZATION_OWNER', 'ORGANIZATION_ADMIN'].includes(effectiveRole);
   const files = data?.files || [];
   const typeFilters = ['image', 'video', 'document', 'other'];
 

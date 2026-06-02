@@ -2,7 +2,8 @@ import { Router } from 'express';
 import { z } from 'zod';
 import mongoose from 'mongoose';
 import { authenticate, AuthRequest } from '../../middleware/authenticate';
-import { authorizeRoles } from '../../middleware/authorize';
+import { authorize, authorizeRoles } from '../../middleware/authorize';
+import { tenantScope } from '../../middleware/tenantScope';
 import { validateBody } from '../../middleware/validate';
 import { User } from '../../models/User';
 import { AuditLog } from '../../models/AuditLog';
@@ -10,16 +11,34 @@ import { NotFoundError, AuthorizationError } from '../../lib/errors';
 import argon2 from 'argon2';
 
 const router = Router();
-router.use(authenticate, authorizeRoles('ADMIN', 'SUPERADMIN'));
 
-// Team management
-router.get('/team', async (_req, res, next) => {
+// All admin routes require authentication + org scope + admin-level role
+// authorizeRoles checks both new orgRole AND legacy role for backward compat
+router.use(
+  authenticate,
+  tenantScope,
+  authorizeRoles(
+    // New org roles
+    'ORGANIZATION_OWNER', 'ORGANIZATION_ADMIN',
+    // Legacy roles (backward compat during migration)
+    'ADMIN', 'SUPERADMIN'
+  )
+);
+
+// ── Team management ────────────────────────────────────────────────────────────
+
+router.get('/team', async (req: AuthRequest, _res, next) => {
   try {
-    const team = await User.find({ role: { $in: ['ADMIN', 'PROJECT_MANAGER', 'CONTRIBUTOR', 'SUPERADMIN'] } })
+    // Org-scoped: only return team members in this organization
+    const orgFilter = req.tenantFilter ?? {};
+    const team = await User.find({
+      ...orgFilter,
+      role: { $in: ['ADMIN', 'PROJECT_MANAGER', 'CONTRIBUTOR', 'SUPERADMIN', 'ORGANIZATION_OWNER', 'ORGANIZATION_ADMIN'] },
+    })
       .select('-passwordHash')
       .sort({ createdAt: -1 })
       .lean();
-    res.json({ success: true, data: team });
+    _res.json({ success: true, data: team });
   } catch (e) { next(e); }
 });
 
@@ -30,7 +49,12 @@ router.post('/team/invite', validateBody(z.object({
 })), async (req: AuthRequest, res, next) => {
   try {
     const { email, name, role } = req.body;
-    const existing = await User.findOne({ email });
+
+    // Check for existing user in this org
+    const existing = await User.findOne({
+      email,
+      ...(req.tenantFilter ?? {}),
+    });
     if (existing) {
       res.status(409).json({ success: false, error: { message: 'Email already exists' } });
       return;
@@ -39,9 +63,22 @@ router.post('/team/invite', validateBody(z.object({
     const tempPassword = Math.random().toString(36).slice(-12);
     const passwordHash = await argon2.hash(tempPassword, { type: argon2.argon2id });
 
-    const user = await User.create({ email, name, role, passwordHash });
+    // Map legacy role to orgRole
+    const orgRoleMap: Record<string, string> = {
+      ADMIN: 'ORGANIZATION_ADMIN',
+      PROJECT_MANAGER: 'PROJECT_MANAGER',
+      CONTRIBUTOR: 'CONTRIBUTOR',
+    };
 
-    // Send invite email using proper template
+    const user = await User.create({
+      email,
+      name,
+      role,
+      orgRole: orgRoleMap[role] || 'CONTRIBUTOR',
+      organizationId: req.user?.organizationId,
+      passwordHash,
+    });
+
     const { sendEmail, getTeamInviteEmail } = await import('../../lib/email');
     const { env } = await import('../../config/env');
     const { getFrontendUrl } = await import('../../lib/frontendUrl');
@@ -60,7 +97,16 @@ router.patch('/team/:id/role', validateBody(z.object({
   role: z.enum(['ADMIN', 'PROJECT_MANAGER', 'CONTRIBUTOR', 'CLIENT']),
 })), async (req: AuthRequest, res, next) => {
   try {
-    const user = await User.findByIdAndUpdate(req.params.id, { role: req.body.role }, { new: true }).select('-passwordHash');
+    const orgRoleMap: Record<string, string> = {
+      ADMIN: 'ORGANIZATION_ADMIN',
+      PROJECT_MANAGER: 'PROJECT_MANAGER',
+      CONTRIBUTOR: 'CONTRIBUTOR',
+    };
+    const user = await User.findOneAndUpdate(
+      { _id: req.params.id, ...(req.tenantFilter ?? {}) },
+      { role: req.body.role, orgRole: orgRoleMap[req.body.role] || req.body.role },
+      { new: true }
+    ).select('-passwordHash');
     if (!user) throw new NotFoundError('User');
     res.json({ success: true, data: user });
   } catch (e) { next(e); }
@@ -68,7 +114,11 @@ router.patch('/team/:id/role', validateBody(z.object({
 
 router.patch('/team/:id/deactivate', async (req: AuthRequest, res, next) => {
   try {
-    const user = await User.findByIdAndUpdate(req.params.id, { isActive: false }, { new: true }).select('-passwordHash');
+    const user = await User.findOneAndUpdate(
+      { _id: req.params.id, ...(req.tenantFilter ?? {}) },
+      { isActive: false },
+      { new: true }
+    ).select('-passwordHash');
     if (!user) throw new NotFoundError('User');
     res.json({ success: true, data: user });
   } catch (e) { next(e); }
@@ -76,17 +126,57 @@ router.patch('/team/:id/deactivate', async (req: AuthRequest, res, next) => {
 
 router.patch('/team/:id/activate', async (req: AuthRequest, res, next) => {
   try {
-    const user = await User.findByIdAndUpdate(req.params.id, { isActive: true }, { new: true }).select('-passwordHash');
+    const user = await User.findOneAndUpdate(
+      { _id: req.params.id, ...(req.tenantFilter ?? {}) },
+      { isActive: true },
+      { new: true }
+    ).select('-passwordHash');
     if (!user) throw new NotFoundError('User');
     res.json({ success: true, data: user });
   } catch (e) { next(e); }
 });
 
-// Audit logs
+// ── Promote to ORGANIZATION_OWNER (ORGANIZATION_OWNER only) ───────────────────
+router.patch('/team/:id/promote-owner', async (req: AuthRequest, res, next) => {
+  try {
+    const userRole = req.user?.orgRole || req.user?.role;
+    if (userRole !== 'ORGANIZATION_OWNER' && userRole !== 'SUPERADMIN') {
+      throw new AuthorizationError('Only an ORGANIZATION_OWNER can promote another user to owner');
+    }
+    const user = await User.findOneAndUpdate(
+      { _id: req.params.id, ...(req.tenantFilter ?? {}) },
+      { role: 'ADMIN', orgRole: 'ORGANIZATION_OWNER' },
+      { new: true }
+    ).select('-passwordHash');
+    if (!user) throw new NotFoundError('User');
+    res.json({ success: true, data: user, message: `${user.name} promoted to ORGANIZATION_OWNER` });
+  } catch (e) { next(e); }
+});
+
+// ── Legacy promote-superadmin (backward compat — dev only) ────────────────────
+router.patch('/team/:id/promote-superadmin', async (req: AuthRequest, res, next) => {
+  try {
+    if (req.user?.role !== 'SUPERADMIN' && req.user?.orgRole !== 'ORGANIZATION_OWNER') {
+      throw new AuthorizationError('Only a SUPERADMIN or ORGANIZATION_OWNER can promote to SUPERADMIN');
+    }
+    const user = await User.findByIdAndUpdate(
+      req.params.id,
+      { role: 'SUPERADMIN', orgRole: 'ORGANIZATION_OWNER' },
+      { new: true }
+    ).select('-passwordHash');
+    if (!user) throw new NotFoundError('User');
+    res.json({ success: true, data: user, message: `${user.name} promoted to SUPERADMIN` });
+  } catch (e) { next(e); }
+});
+
+// ── Audit logs ─────────────────────────────────────────────────────────────────
+
 router.get('/audit-logs', async (req: AuthRequest, res, next) => {
   try {
     const { page = '1', limit = '50', userId, resource } = req.query as Record<string, string>;
-    const filter: Record<string, unknown> = {};
+
+    // Org-scoped audit logs
+    const filter: Record<string, unknown> = { ...(req.tenantFilter ?? {}) };
     if (userId) filter.userId = userId;
     if (resource) filter.resource = resource;
 
@@ -104,36 +194,25 @@ router.get('/audit-logs', async (req: AuthRequest, res, next) => {
   } catch (e) { next(e); }
 });
 
-// ── Promote user to SUPERADMIN (SUPERADMIN only) ──────────────────────────────
-// Use this endpoint to promote your own account or any account to SUPERADMIN.
-// Only existing SUPERADMINs can call this. On a fresh install, use the
-// /admin/bootstrap-superadmin endpoint (no auth required, only works when
-// there are zero SUPERADMINs in the database).
-router.patch('/team/:id/promote-superadmin', async (req: AuthRequest, res, next) => {
-  try {
-    // Only SUPERADMIN can promote to SUPERADMIN
-    if (req.user?.role !== 'SUPERADMIN') {
-      throw new AuthorizationError('Only a SUPERADMIN can promote another user to SUPERADMIN');
-    }
-    const user = await User.findByIdAndUpdate(
-      req.params.id,
-      { role: 'SUPERADMIN' },
-      { new: true }
-    ).select('-passwordHash');
-    if (!user) throw new NotFoundError('User');
-    res.json({ success: true, data: user, message: `${user.name} has been promoted to SUPERADMIN` });
-  } catch (e) { next(e); }
-});
+// ── DB health check ────────────────────────────────────────────────────────────
 
-// ── MongoDB health check ──────────────────────────────────────────────────────
-// Returns connection state, database name, and registered users count.
-router.get('/db-health', async (_req, res, next) => {
+router.get('/db-health', async (req: AuthRequest, res, next) => {
   try {
     const state = mongoose.connection.readyState;
-    const stateMap: Record<number, string> = { 0: 'disconnected', 1: 'connected', 2: 'connecting', 3: 'disconnecting' };
+    const stateMap: Record<number, string> = {
+      0: 'disconnected', 1: 'connected', 2: 'connecting', 3: 'disconnecting',
+    };
     const dbName = mongoose.connection.db?.databaseName ?? 'unknown';
-    const userCount = await User.countDocuments();
-    const users = await User.find().select('name email role isActive createdAt').sort({ createdAt: -1 }).limit(20).lean();
+
+    // Org-scoped user count
+    const orgFilter = req.tenantFilter ?? {};
+    const userCount = await User.countDocuments(orgFilter);
+    const users = await User.find(orgFilter)
+      .select('name email role orgRole isActive createdAt')
+      .sort({ createdAt: -1 })
+      .limit(20)
+      .lean();
+
     res.json({
       success: true,
       data: {

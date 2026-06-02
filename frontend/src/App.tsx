@@ -51,9 +51,12 @@ function RequireGuest({ children }: { children: React.ReactNode }) {
 }
 
 // Guard: redirect to /dashboard if user doesn't have required role
+// Accepts both legacy roles (ADMIN, SUPERADMIN) and new orgRoles (ORGANIZATION_ADMIN, ORGANIZATION_OWNER)
 function RequireRole({ roles, children }: { roles: string[]; children: React.ReactNode }) {
   const { user } = useAuthStore();
-  if (!user || !roles.includes(user.role)) return <Navigate to="/dashboard" replace />;
+  if (!user) return <Navigate to="/dashboard" replace />;
+  const hasRole = roles.includes(user.role) || (user.orgRole ? roles.includes(user.orgRole) : false);
+  if (!hasRole) return <Navigate to="/dashboard" replace />;
   return <>{children}</>;
 }
 
@@ -101,18 +104,18 @@ export default function App() {
           <Route path="/files"                  element={<FilesPage />} />
           <Route path="/messages"               element={<MessagesPage />} />
           {/* Invoices & Contracts: not for CONTRIBUTOR */}
-          <Route path="/invoices"               element={<RequireRole roles={['ADMIN','SUPERADMIN','PROJECT_MANAGER','CLIENT']}><InvoicesPage /></RequireRole>} />
-          <Route path="/invoices/:id"           element={<RequireRole roles={['ADMIN','SUPERADMIN','PROJECT_MANAGER','CLIENT']}><InvoiceDetailPage /></RequireRole>} />
-          <Route path="/contracts"              element={<RequireRole roles={['ADMIN','SUPERADMIN','PROJECT_MANAGER','CLIENT']}><ContractsPage /></RequireRole>} />
-          <Route path="/contracts/:id"          element={<RequireRole roles={['ADMIN','SUPERADMIN','PROJECT_MANAGER','CLIENT']}><ContractDetailPage /></RequireRole>} />
+          <Route path="/invoices"               element={<RequireRole roles={['ADMIN','SUPERADMIN','PROJECT_MANAGER','CLIENT','ORGANIZATION_OWNER','ORGANIZATION_ADMIN']}><InvoicesPage /></RequireRole>} />
+          <Route path="/invoices/:id"           element={<RequireRole roles={['ADMIN','SUPERADMIN','PROJECT_MANAGER','CLIENT','ORGANIZATION_OWNER','ORGANIZATION_ADMIN']}><InvoiceDetailPage /></RequireRole>} />
+          <Route path="/contracts"              element={<RequireRole roles={['ADMIN','SUPERADMIN','PROJECT_MANAGER','CLIENT','ORGANIZATION_OWNER','ORGANIZATION_ADMIN']}><ContractsPage /></RequireRole>} />
+          <Route path="/contracts/:id"          element={<RequireRole roles={['ADMIN','SUPERADMIN','PROJECT_MANAGER','CLIENT','ORGANIZATION_OWNER','ORGANIZATION_ADMIN']}><ContractDetailPage /></RequireRole>} />
           <Route path="/approvals"              element={<ApprovalsPage />} />
           <Route path="/settings"               element={<SettingsPage />} />
           {/* Admin-only routes */}
-          <Route path="/admin/clients"          element={<RequireRole roles={['ADMIN','SUPERADMIN']}><ClientsPage /></RequireRole>} />
-          <Route path="/admin/clients/:id"      element={<RequireRole roles={['ADMIN','SUPERADMIN']}><ClientDetailPage /></RequireRole>} />
-          <Route path="/admin/team"             element={<RequireRole roles={['ADMIN','SUPERADMIN']}><TeamPage /></RequireRole>} />
-          <Route path="/admin/analytics"        element={<RequireRole roles={['ADMIN','SUPERADMIN','PROJECT_MANAGER']}><AnalyticsPage /></RequireRole>} />
-          <Route path="/admin/automations"      element={<RequireRole roles={['ADMIN','SUPERADMIN']}><AutomationsPage /></RequireRole>} />
+          <Route path="/admin/clients"          element={<RequireRole roles={['ADMIN','SUPERADMIN','ORGANIZATION_OWNER','ORGANIZATION_ADMIN']}><ClientsPage /></RequireRole>} />
+          <Route path="/admin/clients/:id"      element={<RequireRole roles={['ADMIN','SUPERADMIN','ORGANIZATION_OWNER','ORGANIZATION_ADMIN']}><ClientDetailPage /></RequireRole>} />
+          <Route path="/admin/team"             element={<RequireRole roles={['ADMIN','SUPERADMIN','ORGANIZATION_OWNER','ORGANIZATION_ADMIN']}><TeamPage /></RequireRole>} />
+          <Route path="/admin/analytics"        element={<RequireRole roles={['ADMIN','SUPERADMIN','PROJECT_MANAGER','ORGANIZATION_OWNER','ORGANIZATION_ADMIN']}><AnalyticsPage /></RequireRole>} />
+          <Route path="/admin/automations"      element={<RequireRole roles={['ADMIN','SUPERADMIN','ORGANIZATION_OWNER','ORGANIZATION_ADMIN']}><AutomationsPage /></RequireRole>} />
         </Route>
 
         {/* ── Catch-all ──────────────────────────────────────── */}

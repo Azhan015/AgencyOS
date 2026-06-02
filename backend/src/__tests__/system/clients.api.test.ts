@@ -27,21 +27,34 @@ jest.mock('../../lib/passport', () => ({ initPassport: jest.fn() }));
 
 import app from '../../app';
 import { User } from '../../models/User';
+import { getOrCreateTestOrg, resetTestOrgCache } from '../setup/testFixtures';
 
 const API = '/api/v1';
 
 // Helper: register + login, return access token
 async function getToken(email: string, password: string, name: string, role?: string): Promise<string> {
-  // Create user directly with the desired role
+  const orgId = await getOrCreateTestOrg();
   const argon2 = await import('argon2');
   const passwordHash = await argon2.hash(password, { type: argon2.argon2id });
-  await User.create({ email, name, role: role || 'ADMIN', passwordHash });
+  const orgRoleMap: Record<string, string> = {
+    SUPERADMIN: 'ORGANIZATION_OWNER',
+    ADMIN: 'ORGANIZATION_ADMIN',
+    PROJECT_MANAGER: 'PROJECT_MANAGER',
+    CONTRIBUTOR: 'CONTRIBUTOR',
+    CLIENT: 'CLIENT',
+  };
+  const legacyRole = role || 'ADMIN';
+  const orgRole = orgRoleMap[legacyRole] || 'CLIENT';
+  // Remove any existing user with this email to avoid conflicts
+  await User.deleteOne({ email });
+  await User.create({ email, name, role: legacyRole, orgRole, organizationId: orgId, passwordHash });
   const res = await request(app).post(`${API}/auth/login`).send({ email, password });
-  return res.body.data.accessToken;
+  return res.body.data?.accessToken;
 }
 
 beforeAll(async () => { await connectTestDb(); });
-afterEach(async () => { await clearTestDb(); });
+beforeEach(async () => { /* org created lazily in getToken */ });
+afterEach(async () => { await clearTestDb(); resetTestOrgCache(); });
 afterAll(async () => { await disconnectTestDb(); });
 
 const VALID_CLIENT = {

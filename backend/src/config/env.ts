@@ -22,6 +22,11 @@ const envSchema = z.object({
   JWT_ACCESS_EXPIRY: z.string().default('15m'),
   JWT_REFRESH_EXPIRY: z.string().default('7d'),
 
+  // Platform JWT (separate secrets for platform admin layer)
+  // Required in production — defaults provided for development only
+  PLATFORM_JWT_ACCESS_SECRET: z.string().min(32, 'Platform JWT access secret must be at least 32 chars').default('platform-access-secret-change-in-production-min32'),
+  PLATFORM_JWT_REFRESH_SECRET: z.string().min(32, 'Platform JWT refresh secret must be at least 32 chars').default('platform-refresh-secret-change-in-production-min32'),
+
   // AWS S3
   AWS_ACCESS_KEY_ID: z.string().optional(),
   AWS_SECRET_ACCESS_KEY: z.string().optional(),
@@ -38,6 +43,17 @@ const envSchema = z.object({
   STRIPE_SECRET_KEY: z.string().optional(),
   STRIPE_WEBHOOK_SECRET: z.string().optional(),
   STRIPE_PUBLISHABLE_KEY: z.string().optional(),
+
+  // Stripe Price IDs (per plan × interval)
+  STRIPE_PRICE_STARTER_MONTHLY: z.string().optional(),
+  STRIPE_PRICE_STARTER_ANNUAL: z.string().optional(),
+  STRIPE_PRICE_GROWTH_MONTHLY: z.string().optional(),
+  STRIPE_PRICE_GROWTH_ANNUAL: z.string().optional(),
+  STRIPE_PRICE_ENTERPRISE_MONTHLY: z.string().optional(),
+  STRIPE_PRICE_ENTERPRISE_ANNUAL: z.string().optional(),
+
+  // Stripe Subscription Webhook Secret (separate from invoice webhook)
+  STRIPE_SUBSCRIPTION_WEBHOOK_SECRET: z.string().optional(),
 
   // Razorpay
   RAZORPAY_KEY_ID: z.string().optional(),

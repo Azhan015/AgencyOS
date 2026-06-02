@@ -44,6 +44,8 @@ export async function register(data: {
   password: string;
   name: string;
   role?: string;
+  organizationId?: string;
+  orgRole?: string;
   deviceInfo?: { deviceId: string; userAgent: string; ip: string };
 }): Promise<LoginResult> {
   // ── Registration gate ────────────────────────────────────────────────────
@@ -67,19 +69,52 @@ export async function register(data: {
     parallelism: 4,
   });
 
-  // The very first account is always SUPERADMIN — no exceptions.
-  // This is enforced here (server-side) regardless of what the client sends.
+  // Check if there's a Client record with this email — if so, link the user to it
+  const matchingClient = await Client.findOne({ email: data.email.toLowerCase().trim() });
+
+  // Determine organization context
+  // If no organizationId provided, create a standalone org for this user (migration path)
+  let organizationId = data.organizationId;
+  if (!organizationId) {
+    const { Organization } = await import('../../models/Organization');
+    const { generateSlug } = await import('../../lib/crypto');
+    const orgSlug = generateSlug(data.email.split('@')[0]) + '-' + Date.now().toString(36);
+    const org = await Organization.create({
+      name: `${data.name}'s Organization`,
+      slug: orgSlug,
+      ownerEmail: data.email.toLowerCase().trim(),
+      status: 'ACTIVE',
+      plan: 'TRIAL',
+    });
+    organizationId = org._id.toString();
+  }
+
+  const legacyRole = matchingClient
+    ? 'CLIENT'
+    : (['SUPERADMIN', 'ADMIN', 'PROJECT_MANAGER', 'CONTRIBUTOR', 'CLIENT'].includes(data.role || '') ? data.role : 'CLIENT') as string;
+
+  const orgRoleMap: Record<string, string> = {
+    SUPERADMIN: 'ORGANIZATION_OWNER',
+    ADMIN: 'ORGANIZATION_ADMIN',
+    PROJECT_MANAGER: 'PROJECT_MANAGER',
+    CONTRIBUTOR: 'CONTRIBUTOR',
+    CLIENT: 'CLIENT',
+  };
+
   const user = await User.create({
     email: data.email,
     passwordHash,
     name: data.name,
-    role: 'SUPERADMIN',
+    role: legacyRole,
+    orgRole: data.orgRole || orgRoleMap[legacyRole] || 'CLIENT',
+    organizationId,
+    clientId: matchingClient ? matchingClient._id : undefined,
   });
 
-  logger.info(
-    { email: data.email, userId: user._id },
-    '🎉 First account created — assigned SUPERADMIN role. Registration is now locked.'
-  );
+  if (matchingClient) {
+    await Client.findByIdAndUpdate(matchingClient._id, { status: 'ONBOARDING' });
+    logger.info({ email: data.email, clientId: matchingClient._id }, 'Registered user linked to existing client record');
+  }
 
   if (data.deviceInfo) {
     await updateDeviceList(user, data.deviceInfo);
@@ -196,6 +231,8 @@ export async function sendMagicLink(email: string, frontendUrl?: string): Promis
     token = signAccessToken({
       sub: user._id.toString(),
       role: user.role,
+      orgRole: user.orgRole || user.role,
+      organizationId: user.organizationId?.toString() || '',
       clientId: user.clientId?.toString(),
       sessionId: 'magic',
     });
@@ -318,6 +355,8 @@ async function generateTokenPair(user: IUser, sessionId: string, family?: string
   const accessToken = signAccessToken({
     sub: user._id.toString(),
     role: user.role,
+    orgRole: user.orgRole || user.role,
+    organizationId: user.organizationId?.toString() || '',
     clientId: user.clientId?.toString(),
     sessionId,
   });
@@ -326,6 +365,7 @@ async function generateTokenPair(user: IUser, sessionId: string, family?: string
     sub: user._id.toString(),
     sessionId,
     family: tokenFamily,
+    organizationId: user.organizationId?.toString() || '',
   });
 
   // Store refresh token hash in Redis

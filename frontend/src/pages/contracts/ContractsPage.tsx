@@ -36,7 +36,10 @@ export function ContractsPage() {
     },
   });
 
-  const canCreate = user && ['ADMIN', 'SUPERADMIN', 'PROJECT_MANAGER'].includes(user.role);
+  const effectiveRole = user?.orgRole || user?.role || '';
+  const canCreate = user && ['ADMIN', 'SUPERADMIN', 'PROJECT_MANAGER',
+    'ORGANIZATION_OWNER', 'ORGANIZATION_ADMIN'].includes(effectiveRole);
+  const isClient = effectiveRole === 'CLIENT';
   const statuses = ['DRAFT', 'SENT', 'VIEWED', 'SIGNED', 'EXECUTED', 'EXPIRED'];
   const contracts = data?.contracts || [];
 
@@ -118,7 +121,7 @@ export function ContractsPage() {
                     <Send className="h-3.5 w-3.5" />
                   </Button>
                 )}
-                {['SENT', 'VIEWED'].includes(contract.status) && user?.role === 'CLIENT' && (
+                {['SENT', 'VIEWED'].includes(contract.status) && isClient && (
                   <Link
                     to={`/contracts/${contract._id}`}
                     className="inline-flex items-center gap-1 h-8 rounded-md px-3 text-xs font-medium border border-input bg-background hover:bg-accent hover:text-accent-foreground transition-colors"
